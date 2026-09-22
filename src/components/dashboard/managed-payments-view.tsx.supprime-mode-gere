@@ -1,0 +1,223 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+    ShieldCheck,
+    Smartphone,
+    Wallet,
+    ArrowRight,
+    CreditCard,
+    RefreshCw,
+    Search,
+} from "lucide-react";
+import { goeyToast } from "goey-toast";
+import { getPaymentMethods, togglePaymentMethod } from "@/lib/actions/methods";
+
+/**
+ * Vue "Passerelles" des applications en mode GERE : le marchand ne voit
+ * JAMAIS la tuyauterie (cles, passerelles, routage). Il voit :
+ *  1. comment les paiements fonctionnent (client paie -> solde -> reversement) ;
+ *  2. les moyens de paiement proposes a ses clients (activables un par un).
+ */
+
+const cardStyle = { background: "var(--dt-card-bg)", border: "1px solid var(--dt-border)" } as const;
+
+const STEPS = [
+    {
+        Icon: Smartphone,
+        title: "Votre client paie",
+        desc: "Mobile money (Orange, Wave, MTN, Moov...) ou carte bancaire, sur votre lien ou votre site.",
+    },
+    {
+        Icon: ShieldCheck,
+        title: "Cartflox encaisse pour vous",
+        desc: "Aucun compte agrégateur à créer : l'infrastructure Cartflox traite le paiement de bout en bout.",
+    },
+    {
+        Icon: Wallet,
+        title: "Votre solde se remplit",
+        desc: "Le montant est crédité sur votre solde, commission déduite, visible en temps réel.",
+    },
+    {
+        Icon: ArrowRight,
+        title: "Vous êtes reversé",
+        desc: "Vous demandez un reversement vers votre mobile money quand vous voulez.",
+    },
+];
+
+export default function ManagedPaymentsView({ commissionBps }: { commissionBps: number }) {
+    const [methods, setMethods] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [busy, setBusy] = useState<string | null>(null);
+    const [query, setQuery] = useState("");
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            setMethods(await getPaymentMethods());
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const toggle = async (m: any) => {
+        setBusy(m.id);
+        try {
+            const r = await togglePaymentMethod(m.id, !m.isActive, {
+                name: m.name, country: m.country, provider: m.gateway,
+                flag: m.flag, type: m.type, logo: m.logo, code: m.code,
+            });
+            if ((r as any)?.success === false) {
+                goeyToast.error((r as any)?.error || "Échec");
+            } else {
+                goeyToast.success(!m.isActive ? `${m.name} activé` : `${m.name} désactivé`);
+                await load();
+            }
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const filtered = query
+        ? methods.filter((m) => `${m.name} ${m.country}`.toLowerCase().includes(query.toLowerCase()))
+        : methods;
+
+    const commissionPct = (commissionBps / 100).toLocaleString("fr-FR");
+
+    return (
+        <div className="flex flex-col gap-6 pb-12 max-w-7xl mx-auto p-4 md:p-8">
+            {/* En-tete */}
+            <div>
+                <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "rgba(16,185,129,0.12)" }}>
+                        <ShieldCheck className="h-4 w-4" style={{ color: "#10b981" }} />
+                    </span>
+                    <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--dt-text-primary)" }}>
+                        Paiements gérés par Cartflox
+                    </h1>
+                </div>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed" style={{ color: "var(--dt-text-muted)" }}>
+                    Vous n&apos;avez rien à configurer : Cartflox encaisse pour vous avec son
+                    infrastructure de paiement. Commission de {commissionPct} % par paiement
+                    réussi, déduite automatiquement. Le reste alimente votre solde.
+                </p>
+            </div>
+
+            {/* Comment ca marche */}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {STEPS.map((s, i) => (
+                    <div key={s.title} className="rounded-xl p-5" style={cardStyle}>
+                        <div className="flex items-center gap-2">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}>
+                                {i + 1}
+                            </span>
+                            <s.Icon className="h-4 w-4" style={{ color: "var(--dt-text-muted)" }} />
+                        </div>
+                        <p className="mt-3 text-sm font-semibold" style={{ color: "var(--dt-text-primary)" }}>{s.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--dt-text-muted)" }}>{s.desc}</p>
+                    </div>
+                ))}
+            </div>
+
+            {/* Lien solde */}
+            <Link
+                href="/payouts"
+                className="flex items-center justify-between rounded-xl p-5 transition-opacity hover:opacity-90"
+                style={{ background: "rgba(16,185,129,0.10)", border: "1px solid rgba(16,185,129,0.25)" }}
+            >
+                <div className="flex items-center gap-3">
+                    <Wallet className="h-5 w-5" style={{ color: "#10b981" }} />
+                    <div>
+                        <p className="text-sm font-semibold" style={{ color: "var(--dt-text-primary)" }}>Voir mon solde et demander un reversement</p>
+                        <p className="text-xs" style={{ color: "var(--dt-text-muted)" }}>Vos encaissements et l&apos;historique de vos reversements</p>
+                    </div>
+                </div>
+                <ArrowRight className="h-4 w-4" style={{ color: "#10b981" }} />
+            </Link>
+
+            {/* Moyens de paiement */}
+            <div className="rounded-xl p-5" style={cardStyle}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 className="font-semibold" style={{ color: "var(--dt-text-primary)" }}>
+                            Moyens de paiement proposés à vos clients
+                        </h2>
+                        <p className="mt-1 text-xs" style={{ color: "var(--dt-text-muted)" }}>
+                            Activez ou désactivez ce que vos clients voient au moment de payer.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" style={{ color: "var(--dt-text-muted)" }} />
+                            <input
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                placeholder="Rechercher (pays, opérateur...)"
+                                className="h-9 w-56 rounded-lg border pl-8 pr-3 text-sm outline-none"
+                                style={{ borderColor: "var(--dt-border)", background: "transparent", color: "var(--dt-text-primary)" }}
+                            />
+                        </div>
+                        <button
+                            onClick={load}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border transition-opacity hover:opacity-70"
+                            style={{ borderColor: "var(--dt-border)", color: "var(--dt-text-muted)" }}
+                            aria-label="Actualiser"
+                        >
+                            <RefreshCw className="h-4 w-4" />
+                        </button>
+                    </div>
+                </div>
+
+                {loading ? (
+                    <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <div key={i} className="h-16 animate-pulse rounded-lg" style={{ background: "var(--dt-border)" }} />
+                        ))}
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <p className="mt-4 text-sm" style={{ color: "var(--dt-text-muted)" }}>Aucun moyen de paiement trouvé.</p>
+                ) : (
+                    <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {filtered.map((m) => (
+                            <div
+                                key={`${m.id}-${m.country}`}
+                                className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                                style={{ borderColor: "var(--dt-border)", opacity: m.isActive ? 1 : 0.55 }}
+                            >
+                                <div className="flex min-w-0 items-center gap-3">
+                                    {m.logo ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={m.logo} alt="" className="h-8 w-8 shrink-0 rounded-full object-contain" />
+                                    ) : (
+                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--dt-border)" }}>
+                                            <CreditCard className="h-4 w-4" style={{ color: "var(--dt-text-muted)" }} />
+                                        </span>
+                                    )}
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium" style={{ color: "var(--dt-text-primary)" }}>{m.name}</p>
+                                        <p className="text-xs" style={{ color: "var(--dt-text-muted)" }}>{m.flag} {m.country} · {m.type}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => toggle(m)}
+                                    disabled={busy === m.id}
+                                    className="relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50"
+                                    style={{ background: m.isActive ? "#10b981" : "var(--dt-border)" }}
+                                    aria-label={m.isActive ? "Désactiver" : "Activer"}
+                                >
+                                    <span
+                                        className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all"
+                                        style={{ left: m.isActive ? "calc(100% - 22px)" : "2px" }}
+                                    />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}

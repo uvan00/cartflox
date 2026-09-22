@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+  <rect width="120" height="40" rx="6" fill="#007A3D"/>
+  <text x="8" y="27" font-family="Arial,sans-serif" font-size="16" font-weight="900" fill="white">EcoCash</text>
+  <circle cx="105" cy="20" r="13" fill="white" opacity="0.15"/>
+  <text x="99" y="26" font-family="Arial,sans-serif" font-size="15" font-weight="900" fill="#FFD700">E</text>
+</svg>

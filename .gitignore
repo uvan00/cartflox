@@ -1,0 +1,29 @@
+# dependances et constructions
+node_modules/
+.next/
+.next-*/
+out/
+dist/
+tsconfig.tsbuildinfo
+
+# environnement et secrets : jamais dans le depot
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+master.key
+service-account*.json
+
+# donnees locales
+public/uploads/
+*.log
+.DS_Store
+._*
+Thumbs.db
+
+# sauvegardes d'edition
+*.bak
+*.bak-*
+*.avant*

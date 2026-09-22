@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Calque_1" data-name="Calque 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 54 54">
+  <rect width="54" height="54" rx="10" fill="#FF6B00"/>
+  <circle cx="27" cy="27" r="16" fill="none" stroke="white" stroke-width="2.5" opacity="0.4"/>
+  <circle cx="27" cy="27" r="10" fill="white" opacity="0.15"/>
+  <text x="27" y="23" font-family="Arial,sans-serif" font-size="9" font-weight="800" fill="white" text-anchor="middle">CORIS</text>
+  <text x="27" y="34" font-family="Arial,sans-serif" font-size="7.5" font-weight="600" fill="white" text-anchor="middle">MONEY</text>
+</svg>

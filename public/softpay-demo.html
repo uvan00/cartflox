@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Démo SoftPay : le paiement Cartflox dans votre page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; font-family: "Inter Tight", system-ui, sans-serif; background: #F4F4F7; color: #1a1a1c; }
+  .page { max-width: 1040px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sous { color: #6f6f78; margin: 0 0 28px; }
+  .grille { display: grid; gap: 24px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .grille { grid-template-columns: 360px 1fr; } }
+  .panneau { background: #fff; border: 1px solid #E9E9F0; border-radius: 20px; padding: 22px; }
+  label { display: block; font-size: 12px; color: #6f6f78; margin: 14px 0 6px; }
+  input[type=text], input[type=number], select { width: 100%; height: 42px; padding: 0 12px; border: 1px solid #E9E9F0; border-radius: 10px; font: inherit; font-size: 14px; box-sizing: border-box; }
+  input[type=color] { width: 44px; height: 32px; border: 0; background: none; padding: 0; vertical-align: middle; }
+  .ligne { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  button.lancer { margin-top: 18px; width: 100%; height: 46px; border: 0; border-radius: 999px; background: #1a1a1c; color: #fff; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer; }
+  .note { font-size: 12px; color: #6f6f78; line-height: 1.5; margin-top: 12px; }
+  .apercu { display: flex; align-items: flex-start; justify-content: center; }
+  pre { background: #0d0d0d; color: #d4d4d8; border-radius: 12px; padding: 14px; font-size: 12px; overflow: auto; }
+  .journal { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #6f6f78; margin-top: 14px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Démo SoftPay</h1>
+  <p class="sous">Le paiement Mobile Money et carte, dans votre page, avec vos couleurs. Collez votre clé publique et lancez un paiement de test.</p>
+
+  <div class="grille">
+    <div class="panneau">
+      <label>Clé publique (af_live_pub_...)</label>
+      <input type="text" id="cle" placeholder="af_live_pub_..." autocomplete="off">
+      <label>Montant</label>
+      <input type="number" id="montant" value="100" min="1">
+      <label>Devise</label>
+      <select id="devise"><option>XOF</option><option>XAF</option><option>GHS</option><option>NGN</option><option>USD</option><option>EUR</option></select>
+      <label>Pays des moyens de paiement</label>
+      <select id="pays"><option value="ci">Côte d'Ivoire</option><option value="sn">Sénégal</option><option value="bj">Bénin</option><option value="tg">Togo</option><option value="ml">Mali</option><option value="bf">Burkina Faso</option><option value="cm">Cameroun</option><option value="gn">Guinée</option><option value="">Tous</option></select>
+
+      <label>Vos couleurs</label>
+      <div class="ligne"><span style="font-size:13px">Bouton</span><input type="color" id="accent" value="#1a1a1c"></div>
+      <div class="ligne"><span style="font-size:13px">Texte du bouton</span><input type="color" id="accentText" value="#ffffff"></div>
+      <div class="ligne"><span style="font-size:13px">Fond</span><input type="color" id="fond" value="#ffffff"></div>
+      <div class="ligne"><span style="font-size:13px">Texte</span><input type="color" id="texte" value="#1a1a1c"></div>
+      <label>Arrondi <span id="radiusVal">14</span> px</label>
+      <input type="range" id="radius" min="0" max="32" value="14" style="width:100%">
+
+      <button class="lancer" id="lancer">Afficher le formulaire de paiement</button>
+      <p class="note">Aucune donnée n'est enregistrée par cette page. Le paiement créé est une vraie session sur votre compte : avec vos clés de test, aucun argent ne circule.</p>
+      <div class="journal" id="journal"></div>
+    </div>
+
+    <div>
+      <div class="panneau apercu" style="min-height:420px" id="zone">
+        <div id="paiement" style="width:100%;max-width:440px"></div>
+      </div>
+      <pre id="code"></pre>
+    </div>
+  </div>
+</div>
+
+<script src="/cartflox-softpay.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var journal = function (m) { $('journal').textContent += m + "\n"; };
+  $('radius').addEventListener('input', function () { $('radiusVal').textContent = $('radius').value; });
+
+  function theme() {
+    return { accent: $('accent').value, "accent-text": $('accentText').value, bg: $('fond').value, text: $('texte').value, radius: $('radius').value + "px" };
+  }
+  function montrerCode(t) {
+    $('code').textContent =
+'<div id="paiement"></div>\n<script src="' + location.origin + '/cartflox-softpay.js"><\/script>\n<script>\n' +
+'  Cartflox.softpay.configure({ publicKey: "' + ($('cle').value || 'af_live_pub_...') + '" });\n' +
+'  Cartflox.softpay.mount({\n    container: "#paiement",\n    amount: ' + Number($('montant').value) + ',\n    currency: "' + $('devise').value + '",\n' +
+'    country: "' + $('pays').value + '",\n    theme: ' + JSON.stringify(t) + ',\n' +
+'    onSuccess: function (r) { console.log("payé", r); },\n    onError: function (e) { console.error(e); }\n  });\n<\/script>';
+  }
+  $('lancer').addEventListener('click', function () {
+    var cle = $('cle').value.trim();
+    if (cle.indexOf('af_live_pub_') !== 0) { journal("Il faut votre clé PUBLIQUE (af_live_pub_...), disponible dans API & Logs."); return; }
+    $('journal').textContent = "";
+    var t = theme();
+    montrerCode(t);
+    Cartflox.softpay.configure({ publicKey: cle, country: $('pays').value });
+    Cartflox.softpay.mount({
+      container: "#paiement",
+      amount: Number($('montant').value) || 100,
+      currency: $('devise').value,
+      description: "Démo SoftPay",
+      country: $('pays').value,
+      theme: t,
+      onSession: function (s) { journal("session créée : " + s.id); },
+      onStatus: function (r) { journal("statut : " + (r.status || "")); },
+      onRedirect: function (u) { journal("redirection vers " + u); },
+      onSuccess: function (r) { journal("PAYÉ " + r.amount + " " + r.currency); },
+      onError: function (e) { journal("erreur : " + (e && e.message)); },
+      autoRedirect: false
+    });
+  });
+  montrerCode(theme());
+})();
+</script>
+</body>
+</html>

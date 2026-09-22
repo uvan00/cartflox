@@ -1,0 +1,78 @@
+/* Cartflox SoftPay : style par defaut, entierement surchargeable.
+   Changez les variables --cf-* (via l'option theme ou votre CSS), ou ciblez
+   les classes cf-sp-*. Chargez le script avec { css: false } pour partir de zero. */
+.cf-sp {
+  --cf-accent: #1a1a1c;
+  --cf-accent-text: #ffffff;
+  --cf-bg: #ffffff;
+  --cf-text: #1a1a1c;
+  --cf-muted: #6f6f78;
+  --cf-border: #e6e6ec;
+  --cf-field: #f4f4f7;
+  --cf-radius: 14px;
+  --cf-font: inherit;
+  --cf-success: #1f8a4c;
+  --cf-error: #d64545;
+  font-family: var(--cf-font);
+  color: var(--cf-text);
+  background: var(--cf-bg);
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius);
+  padding: 20px;
+  max-width: 440px;
+  box-sizing: border-box;
+}
+.cf-sp *, .cf-sp *::before, .cf-sp *::after { box-sizing: border-box; }
+.cf-sp-entete { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.cf-sp-titre { font-size: 14px; color: var(--cf-muted); }
+.cf-sp-montant { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.cf-sp-label { display: block; font-size: 12px; color: var(--cf-muted); margin: 14px 0 8px; }
+.cf-sp-methodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.cf-sp-methode {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px; border: 1px solid var(--cf-border); border-radius: calc(var(--cf-radius) - 4px);
+  background: var(--cf-bg); color: var(--cf-text); cursor: pointer; font: inherit; transition: border-color .15s, box-shadow .15s;
+}
+.cf-sp-methode:hover { border-color: var(--cf-accent); }
+.cf-sp-methode.cf-sp-actif { border-color: var(--cf-accent); box-shadow: 0 0 0 2px var(--cf-accent) inset; }
+.cf-sp-methode img { width: 32px; height: 32px; object-fit: contain; }
+.cf-sp-initiale { width: 32px; height: 32px; border-radius: 50%; background: var(--cf-field); display: grid; place-items: center; font-weight: 600; }
+.cf-sp-methode-nom { font-size: 12px; font-weight: 500; text-align: center; line-height: 1.2; }
+.cf-sp-methode-pays { font-size: 11px; }
+.cf-sp-telephone { display: flex; gap: 8px; }
+.cf-sp-indicatif { display: flex; align-items: center; padding: 0 12px; border-radius: calc(var(--cf-radius) - 4px); background: var(--cf-field); font-size: 14px; font-weight: 500; }
+.cf-sp-input {
+  flex: 1; width: 100%; height: 46px; padding: 0 14px; font: inherit; font-size: 16px; color: var(--cf-text);
+  background: var(--cf-field); border: 1px solid transparent; border-radius: calc(var(--cf-radius) - 4px); outline: none;
+}
+.cf-sp-input:focus { border-color: var(--cf-accent); background: var(--cf-bg); }
+.cf-sp-otp { text-align: center; letter-spacing: .3em; font-size: 20px; }
+.cf-sp-bouton {
+  display: flex; align-items: center; justify-content: center; width: 100%; height: 48px; margin-top: 16px;
+  border: 0; border-radius: 999px; background: var(--cf-accent); color: var(--cf-accent-text);
+  font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; text-decoration: none; transition: opacity .15s;
+}
+.cf-sp-bouton:hover { opacity: .92; }
+.cf-sp-bouton[disabled] { opacity: .35; cursor: not-allowed; }
+.cf-sp-lien { display: block; width: 100%; margin-top: 10px; background: none; border: 0; color: var(--cf-muted); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+.cf-sp-erreur { margin-bottom: 12px; padding: 10px 12px; border-radius: calc(var(--cf-radius) - 4px); background: rgba(214,69,69,.08); color: var(--cf-error); font-size: 13px; }
+.cf-sp-vide { font-size: 13px; color: var(--cf-muted); grid-column: 1 / -1; text-align: center; padding: 20px 0; }
+.cf-sp-attente { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 18px 0; }
+.cf-sp-fort { font-weight: 600; font-size: 15px; margin: 0; }
+.cf-sp-doux { font-size: 13px; color: var(--cf-muted); margin: 0; line-height: 1.5; }
+.cf-sp-spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--cf-border); border-top-color: var(--cf-accent); animation: cf-sp-tour .9s linear infinite; }
+@keyframes cf-sp-tour { to { transform: rotate(360deg); } }
+.cf-sp-ussd { display: inline-block; margin: 6px 0 4px; padding: 10px 18px; border-radius: 999px; background: var(--cf-field); color: var(--cf-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 20px; font-weight: 600; text-decoration: none; letter-spacing: .05em; }
+.cf-sp-coche, .cf-sp-croix { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; color: #fff; }
+.cf-sp-coche { background: var(--cf-success); }
+.cf-sp-croix { background: var(--cf-error); }
+.cf-sp-pied { margin-top: 16px; text-align: center; font-size: 11px; color: var(--cf-muted); display: flex !important; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 8px; }
+/* Mention Cartflox : toujours visible, elle fait partie des conditions d'utilisation de SoftPay. */
+.cf-sp-propulse { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; align-items: center; gap: 4px; color: var(--cf-muted); text-decoration: none; }
+.cf-sp-propulse:hover { color: var(--cf-text, inherit); }
+.cf-sp-propulse strong { font-weight: 600; color: var(--cf-text, inherit); }
+.cf-sp-propulse img { width: 14px; height: 14px; }
+/* Lien d'application (Wave, Djamo) : QR code sur grand ecran seulement. */
+.cf-sp-qr { display: block; margin: 12px auto 0; border: 1px solid var(--cf-border); border-radius: var(--cf-radius); background: #fff; }
+.cf-sp-qr-aide { text-align: center; }
+@media (max-width: 640px) { .cf-sp-qr, .cf-sp-qr-aide { display: none; } }

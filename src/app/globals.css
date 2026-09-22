@@ -1,0 +1,222 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #18181b;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #191919;
+  --foreground: #fafafa;
+  --card: #1f1f1f;
+  --card-foreground: #fafafa;
+  --popover: #1f1f1f;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --secondary: #252525;
+  --secondary-foreground: #fafafa;
+  --muted: #252525;
+  --muted-foreground: #a1a1aa;
+  --accent: #252525;
+  --accent-foreground: #fafafa;
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fafafa;
+  --border: #252525;
+  --input: #252525;
+  --ring: #d4d4d8;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased transition-colors duration-300;
+  }
+}
+
+/* ── No animations mode ── */
+.no-animations *,
+.no-animations *::before,
+.no-animations *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ── Antd Table dark override for AfriFlow ── */
+.afriflow-table .ant-table {
+  background: transparent !important;
+}
+.afriflow-table .ant-table-thead > tr > th {
+  background: rgba(255,255,255,0.03) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.05) !important;
+  color: rgba(255,255,255,0.3) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+}
+.afriflow-table .ant-table-tbody > tr > td {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255,255,255,0.03) !important;
+  color: rgba(255,255,255,0.7) !important;
+  padding: 10px 16px !important;
+}
+.afriflow-table .ant-table-tbody > tr:hover > td {
+  background: rgba(255,255,255,0.02) !important;
+}
+.afriflow-table .ant-table-cell-scrollbar {
+  display: none;
+}
+
+@layer utilities {
+  .soft-glass {
+    @apply bg-background/80 backdrop-blur-md border border-border/50;
+  }
+
+  .sidebar-shadow {
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.02);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .sidebar-nav-item:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+  }
+
+  /* Ancien motif de fond : image chargee depuis GitHub et filtre invert(1)
+     sur tout l'ecran. Retire (voir layout.tsx) : dependance externe inutile
+     et couche filtree de plus sur les appareils modestes. */
+  .bg_pattern_wazzap_conversation {
+    display: none;
+  }
+}
+/* ── Bento landing v2 : ligne de connexion animee + pulsations ── */
+@keyframes af-dash-flow {
+  to { stroke-dashoffset: -20; }
+}
+@keyframes af-soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .af-dash-line, .af-pulse { animation: none !important; }
+}
+
+/* Menu lateral facon Chatwoot : ligne d'arborescence a gauche des sous-entrees. */
+.cf-arbre { position: relative; padding-inline-start: .5rem; margin-inline-start: .75rem; }
+.cf-arbre::before { content: ""; position: absolute; inset-inline-start: 0; top: 0; width: 2px; height: 100%; background: var(--dt-border, rgba(255,255,255,.08)); }
+.cf-arbre:first-child::before { border-radius: 2px 2px 0 0; }
+.cf-arbre:last-child::before { height: 20%; }
+.cf-arbre:last-child::after { content: ""; position: absolute; inset-inline-start: 0; bottom: calc(50% - 2px); height: .75rem; width: .625rem; border-bottom: 2px solid var(--dt-border, rgba(255,255,255,.08)); border-inline-start: 2px solid var(--dt-border, rgba(255,255,255,.08)); border-end-start-radius: .25rem; }
+
+
+/* Barre laterale shadcn (coque des tableaux de bord) : valeurs par defaut pour
+   les tiroirs et menus rendus hors de la coque ; la coque pose les siennes. */
+:root {
+  --sidebar: #221f26;
+  --sidebar-foreground: #e7e6ea;
+  --sidebar-primary: #66cccc;
+  --sidebar-primary-foreground: #221f26;
+  --sidebar-accent: #34313c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #66cccc;
+}
+.dark {
+  --sidebar: #131314;
+  --sidebar-foreground: #b4b4b8;
+  --sidebar-primary: #2e2e32;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(255,255,255,0.055);
+  --sidebar-accent-foreground: #ededef;
+  --sidebar-border: rgba(255,255,255,0.07);
+  --sidebar-ring: #864FFE;
+}
+
+/* antd (via Lobehub) colore tous les liens de la page ; les composants shadcn
+   de la coque comptent sur l'heritage. On le retablit dans la barre laterale
+   et l'en-tete, avec une specificite (0,1,1) qui laisse gagner les etats
+   actif et survol de shadcn (0,2,0). */
+.coque-tableau :where([data-sidebar], header) a { color: inherit; }
+
+/* La coque des tableaux de bord prend sa propre police (Poppins) ; le site
+   public et le tunnel de paiement gardent la leur. */
+.coque-tableau, .coque-tableau input, .coque-tableau button, .coque-tableau select, .coque-tableau textarea { font-family: var(--police-tableau), system-ui, sans-serif; }
+
+/* antd injecte ses styles hors de tout @layer : ils battent les utilitaires
+   Tailwind (en @layer utilities) quelle que soit la specificite, d'ou un
+   `a { background-color: transparent }` qui effacait la pastille de l'element
+   actif et le survol. On redit ces etats hors layer, dans la coque seulement. */
+.coque-tableau [data-sidebar="menu-button"]:hover,
+.coque-tableau [data-sidebar="menu-sub-button"]:hover { background-color: var(--sidebar-accent); color: var(--sidebar-accent-foreground); }
+.coque-tableau [data-sidebar="menu-button"][data-active],
+.coque-tableau [data-sidebar="menu-sub-button"][data-active],
+.coque-tableau [data-sidebar="menu-button"][data-active]:hover { background-color: var(--sidebar-primary); color: var(--sidebar-primary-foreground); }
+.coque-tableau header a:hover { color: var(--foreground); }

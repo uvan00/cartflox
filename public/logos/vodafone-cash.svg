@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+  <rect width="120" height="40" rx="6" fill="#E60000"/>
+  <text x="10" y="16" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="white">VODAFONE</text>
+  <text x="10" y="30" font-family="Arial,sans-serif" font-size="9" font-weight="600" fill="white">CASH</text>
+  <circle cx="104" cy="20" r="13" fill="white" opacity="0.15"/>
+  <circle cx="104" cy="20" r="7" fill="white" opacity="0.25"/>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+  <rect width="120" height="40" rx="6" fill="#078A3C"/>
+  <text x="10" y="16" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#FFD700">tele</text>
+  <text x="36" y="16" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="white">birr</text>
+  <text x="10" y="30" font-family="Arial,sans-serif" font-size="8" font-weight="400" fill="rgba(255,255,255,0.7)">Ethio Telecom</text>
+  <circle cx="103" cy="20" r="13" fill="white" opacity="0.1"/>
+  <text x="96" y="26" font-family="Arial,sans-serif" font-size="18" font-weight="900" fill="#FFD700">t</text>
+</svg>

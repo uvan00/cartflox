@@ -1,0 +1,602 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// AFRIFLOW IDENTITY — Payer Profile Network
+
+// ───────────────────────── Mode geré : argent des marchands ─────────────────────────
+
+// KYC — verification d'identite du marchand
+// ------------------------------------------------------------
+// Cartflox encaisse et REVERSE de l'argent pour le compte de ses
+// marchands (mode « managed »). Reverser des fonds a quelqu'un
+// dont on n'a jamais verifie l'identite, c'est la porte ouverte
+// au blanchiment et c'est le premier point que regarde un
+//
+// Les pieces justificatives ne sont PAS stockees en base ni dans
+// /public : seuls leurs chemins le sont, les fichiers vivent hors
+// du dossier web et ne sont servis qu'a leur proprietaire ou a un
+// administrateur, via une route authentifiee.
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Orchestration mesuree (modele Hyperswitch)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model User {
+  id             String          @id @default(cuid())
+  name           String
+  email          String          @unique
+  emailVerified  DateTime?
+  password       String?
+  phone          String?
+  country        String?
+  image          String?
+  totpSecret     String?
+  totpEnabled    Boolean         @default(false)
+  totpVerifiedAt DateTime?
+  totpLastCounter Int?           // last accepted TOTP time-step — blocks code replay
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  applications   Application[]
+  notifications  Notification[]
+  // Better Auth (2026-09) : adresse verifiee (booleen), double authentification, sessions et comptes.
+  emailVerifie     Boolean       @default(false)
+  twoFactorEnabled Boolean       @default(false)
+  authSessions     AuthSession[]
+  authAccounts     AuthAccount[]
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // "payment", "security", "system", "info"
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, read])
+}
+
+model Application {
+  id               String          @id @default(cuid())
+  name             String
+  website          String?
+  category         String?
+  image            String?
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gateways         Gateway[]
+  paymentMethods   PaymentMethod[]
+  paymentRecords   Transaction[]
+  customers        Customer[]
+  paymentLinks     PaymentLink[]
+  apiConfig        ApiConfig?
+  team             TeamMember[]
+  auditLogs        AuditLog[]
+  routingConfig    RoutingConfig?
+  transferts     Transfert[]
+
+  // Mode de paiement :
+  //  - "managed"  : le marchand encaisse via les passerelles PLATEFORME (cles
+  //    AfriFlow, invisibles pour lui). Commission preleve, solde credite au
+  //    grand livre, reverse par payout.
+  //  - "own_keys" : le marchand branche ses propres cles agregateurs.
+  paymentMode      String          @default("own_keys")
+  // Commission plateforme en points de base (100 = 1 %). Mode managed uniquement.
+  // 5 % : il faut couvrir les frais d'encaissement de l'agrégateur (1,75 % à
+  // 3,3 % selon l'opérateur) ET le reversement au marchand (1 % à 2 %).
+  commissionBps    Int             @default(500)
+  // Qui paie les frais de la passerelle en mode managed :
+  //  - false (défaut) : le marchand, ils sortent de sa commission ;
+  //  - true : le client, le montant à payer est majoré à la création du paiement.
+  fraisClient      Boolean         @default(false)
+  // Encaissement reel autorise. FAUX par defaut : un espace « Cartflox simple »
+  // reste en bac a sable tant que son identite n'est pas verifiee (cf.
+  // src/lib/mode-espace.ts). Bascule par deciderKyc, forcable par un admin.
+  liveMode         Boolean         @default(false)
+  // Transferts d'argent sortants : ouverts a tous ; l'administration peut fermer un espace.
+  transfertsActifs    Boolean @default(true)
+  transfertFraisBps   Int?
+  transfertMaxParJour Int     @default(200)
+  // Coordonnees de reversement (mode managed) : "wave" | "orange" | "mtn" | "moov" | "bank"
+  payoutMethod     String?
+  payoutRecipient  String?
+  payoutCountry    String?
+
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([userId])
+}
+
+model ApiConfig {
+  id               String      @id @default(cuid())
+  applicationId    String?     @unique
+  publicKey        String      @unique
+  secretKey        String
+  webhookUrl       String?
+  // Bac a sable unifie : un second jeu de cles (af_test_pub_ / af_test_sec_), une
+  // adresse de webhook de test facultative, et la liste des evenements souhaites
+  // (vide = tous).
+  testPublicKey    String?     @unique
+  testSecretKey    String?
+  testWebhookUrl   String?
+  webhookEvents    String[]    @default([])
+  lastRotationAt   DateTime    @default(now())
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  application      Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id            String      @id @default(cuid())
+  applicationId String?
+  actorName     String
+  action        String
+  ipAddress     String?
+  location      String?
+  createdAt     DateTime    @default(now())
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model TeamMember {
+  id            String      @id @default(cuid())
+  applicationId String?      // Linked to specific app
+  name          String
+  email         String
+  role          String      // Job title
+  permission    String      // e.g. "Super Admin", "Manager", "Support"
+  status        String      @default("Hors ligne")
+  avatar        String?
+  lastActive    String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model Customer {
+  id            String      @id @default(cuid())
+  applicationId String?
+  name          String
+  email         String
+  phone         String?
+  country       String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, email])
+  @@index([applicationId])
+}
+
+model Transaction {
+  id             String            @id @default(cuid())
+  applicationId  String?
+  gnataProjectId String?
+  orderId        String            @unique
+  amount         Float
+  currency       String            @default("XOF")
+  status         TransactionStatus @default(PENDING)
+  paymentType    PaymentType
+  provider       String
+  providerRef    String?           @unique
+  customerName   String
+  customerEmail  String
+  customerPhone  String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  completedAt    DateTime?
+  platformFee    Float?            // 1% AfriFlow commission (silent)
+  merchantAmount Float?            // amount - platformFee
+  // Donnee de TEST (cle af_test_ ou espace en bac a sable) : jamais melangee aux
+  // listes, statistiques et exports de production (cf. src/lib/db.ts).
+  test           Boolean           @default(false)
+  application    Application?      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  logs           ProviderLog[]
+
+  @@index([status])
+  @@index([provider])
+  @@index([applicationId])
+  // Hot path: dashboard lists/filters transactions by app, ordered/filtered by date.
+  @@index([applicationId, createdAt])
+  @@index([applicationId, test, createdAt])
+}
+
+model ProviderLog {
+  id            String        @id @default(cuid())
+  transactionId String
+  type          String
+  payload       Json
+  timestamp     DateTime      @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId])
+}
+
+model PaymentMethod {
+  id            String      @id @default(cuid())
+  applicationId String?
+  name          String
+  country       String
+  flag          String?
+  provider      String
+  type          PaymentType
+  isActive      Boolean     @default(true)
+  uptime        String      @default("100%")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model Gateway {
+  id            String      @id @default(cuid())
+  applicationId String?
+  // Passerelle PLATEFORME (cles AfriFlow) : applicationId null + isPlatform true.
+  // Servie aux applications en mode "managed", jamais exposee dans leur dashboard.
+  isPlatform    Boolean     @default(false)
+  name          String
+  countries     String[]
+  status        String      @default("active")
+  uptime        String
+  successRate   String
+  logo          String?
+  apiKey        String?
+  apiSecret     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  config        Json?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([isPlatform, status])
+}
+
+// Routing configuration: which provider handles which method, and fallback order
+model RoutingConfig {
+  id              String      @id @default(cuid())
+  applicationId   String      @unique
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  // Active algorithm kind
+
+  // method assignments: { "methodCode||country": "gatewayId" }
+  methodAssignments Json?
+
+  // PRIORITY / fallback: ordered list of gatewayIds to try
+  fallbackOrder   String[]
+
+  // VOLUME_SPLIT: [{ gatewayId: string, split: number (0-100) }]
+  volumeSplits    Json?
+
+  // ADVANCED (rule-based DSL): list of rules evaluated in order
+  // Each rule: { name, conditions: [{field, operator, value}], gatewayIds: string[] }
+  // Fields: amount, currency, country, methodCode, methodType
+  // Operators: eq, neq, gt, gte, lt, lte, in
+  routingRules    Json?
+
+  // DYNAMIC: success scores per gateway { gatewayId: score (0–100) }
+  // Recalculated after each payment attempt
+  successScores   Json?
+
+  // Auto-retry: max number of fallback attempts (mirrors Hyperswitch max_auto_retries)
+  maxRetries      Int         @default(3)
+
+  // which providers are allowed in smart routing (empty = all active)
+  allowedProviders String[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+// Audit trail of every routing decision the engine made.
+// Lets merchants debug "why did this payment go through gateway X?".
+model RoutingDecision {
+  id                  String      @id @default(cuid())
+  applicationId       String
+  transactionId       String?
+  methodCode          String
+  country             String
+  currency            String
+  amount              Float
+  // Ordered list of gatewayIds the engine resolved to try
+  orderedGatewayIds   String[]
+  // The first gateway that was actually attempted (= orderedGatewayIds[0] for now)
+  chosenGatewayId     String?
+  // Final outcome: 'SUCCESS' | 'FAILED' | 'PENDING'
+  outcome             String      @default("PENDING")
+  // Free-form reason / explanation (human-readable trace summary)
+  reason              String?
+  // Whether a method-assignment override was hit
+  assignedOverride    Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+
+  @@index([applicationId, createdAt])
+  @@index([transactionId])
+  @@index([chosenGatewayId])
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentType {
+  MOBILE_MONEY
+  CARD
+  BANK_TRANSFER
+}
+
+model PaymentLink {
+  id            String      @id @default(cuid())
+  applicationId String?
+  slug          String      @unique
+  title         String
+  description   String?
+  amount        Float
+  currency      String      @default("XOF")
+  status        String      @default("active") // active, inactive, expired
+  
+  // Advanced options
+  requestPhone  Boolean     @default(false)
+  allowQuantity Boolean     @default(false)
+  // Montant libre : le client saisit lui-meme ce qu'il paie, entre les bornes.
+  // `amount` sert alors de montant suggere (0 = aucune suggestion).
+  amountFree    Boolean     @default(false)
+  amountMin     Float?
+  amountMax     Float?
+  // Qui paie les frais de service : null = le reglage de l'espace fait foi.
+  feesOnCustomer Boolean?
+  // Page produit : jusqu'a 4 images, la premiere est la principale.
+  images        Json?
+  webhookUrl    String?
+  facebookPixelId String?
+  googleAdsId   String?
+  customSuccessMessage String?
+  expiresAt     DateTime?
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  payload     Json
+  headers     Json?
+  status      String   @default("PENDING") // PENDING, PROCESSED, FAILED
+  error       String?
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([provider])
+  @@index([status])
+}
+
+model PayerProfile {
+  id                String    @id @default(cuid())
+  phone             String    @unique // Numéro international normalisé (+221770000000)
+  phoneHash         String    @unique // Hash pour lookup rapide
+  name              String?
+  email             String?
+  country           String    // Code ISO (SN, CI, BJ...)
+  
+  // Méthode de paiement préférée
+  preferredMethod   String?   // "orange_money", "wave", "mtn_momo", etc.
+  preferredProvider String?   // "paydunya", "cinetpay", etc.
+  
+  // Méthodes sauvegardées (historique de tous les moyens utilisés)
+  savedMethods      Json?     // [{ method: "wave", lastUsed: "...", successCount: 5 }, ...]
+  
+  // Statistiques
+  totalPayments     Int       @default(0)
+  totalAmount       Float     @default(0)
+  lastPaymentAt     DateTime?
+  lastMerchantName  String?   // Dernier marchand utilisé
+  
+  // Sécurité
+  isVerified        Boolean   @default(false)
+  verifiedAt        DateTime?
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([phone])
+  @@index([country])
+  @@index([preferredMethod])
+}
+
+/// Better Auth : sessions en base (cookie de domaine .cartflox.com).
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Better Auth : un compte par moyen de connexion (« credential » porte le mot de passe, « google » le compte Google).
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Better Auth : jetons de verification d'adresse et de reinitialisation.
+model AuthVerification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+enum TransfertStatut {
+  EN_ATTENTE // cree, pas encore confie au fournisseur
+  EN_COURS   // confie au fournisseur, issue inconnue
+  REUSSI
+  ECHOUE
+}
+
+// Argent SORTANT : un marchand envoie une somme vers un compte Mobile Money
+// (fournisseur, salarie, client rembourse...).
+model Transfert {
+  id              String          @id @default(cuid())
+  applicationId   String
+  application     Application     @relation(fields: [applicationId], references: [id])
+  reference       String          @unique // notre identifiant, envoye au fournisseur (payoutId chez PawaPay)
+  cleIdempotence  String?         // fournie par l'appelant : meme cle, meme transfert, jamais un second envoi
+  montant         Float
+  devise          String
+  frais           Float           @default(0) // frais Cartflox (solde Connect), 0 avec les cles du marchand
+  pays            String          // ISO 3166-1 alpha-2
+  operateur       String          // code Cartflox (mtn_money, orange_money, wave...)
+  telephone       String          // chiffres seuls, indicatif compris
+  nomBeneficiaire String?
+  motif           String?
+  statut          TransfertStatut @default(EN_ATTENTE)
+  fournisseur     String?
+  gatewayId       String?
+  refFournisseur  String?         // reference chez le fournisseur une fois l'envoi confie
+  codeFournisseur String?         // operateur tel que le fournisseur le nomme (MTN_MOMO_CIV)
+  echecCode       String?
+  echecMessage    String?
+  metadata        Json?
+  source          String          @default("api") // api | tableau_de_bord
+  ledgerEntryId   String?         // debit du grand livre (solde Connect)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  termineLe       DateTime?
+
+  @@unique([applicationId, cleIdempotence])
+  @@index([applicationId, createdAt])
+  @@index([statut])
+}
+
+// Journal des webhooks SORTANTS (vers le serveur du marchand) : chaque envoi est
+// une ligne, rejouee par le cron /api/cron/webhooks-retry jusqu'a 10 tentatives
+// sur 72 h, et renvoyable a la main depuis le tableau de bord ou l'API.
+model WebhookDelivery {
+  id             String    @id @default(cuid())
+  applicationId  String
+  event          String
+  url            String
+  payload        Json
+  test           Boolean   @default(false)
+  status         String    @default("PENDING") // PENDING, SENDING, DELIVERED, FAILED
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(10)
+  nextAttemptAt  DateTime?
+  lastStatusCode Int?
+  lastError      String?
+  responseMs     Int?
+  transactionId  String?
+  transfertId    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  deliveredAt    DateTime?
+
+  @@index([applicationId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([transactionId])
+}
+
+/// Traduction d'un code d'erreur brut en categorie et en decision de routage.
+/// Equivalent du « Gateway Status Map » d'Hyperswitch : en base, donc corrigible
+/// sans deploiement. `passerelle = "*"` pose une regle valable partout ; la
+/// regle la plus precise gagne.
+model CodeFournisseur {
+  id            String   @id @default(cuid())
+  passerelle    String
+  /// Code brut du fournisseur. Absent quand la règle se joue sur le message.
+  code          String?
+  /// Morceau de message reconnu quand le fournisseur n'envoie aucun code
+  /// (PayDunya répond en français, sans code). Comparé sans accents ni casse.
+  fragmentMessage String?
+  /// PANNE_FOURNISSEUR | REFUS_CLIENT | MOYEN_INVALIDE | ABANDON_CLIENT | TEMPORAIRE | INCONNU
+  categorie     String
+  /// REESSAYER | ARRETER
+  decision      String   @default("ARRETER")
+  messageUnifie String?
+  creeLe        DateTime @default(now())
+  majLe         DateTime @default(now()) @updatedAt
+
+  @@unique([passerelle, code], map: "CodeFournisseur_cle")
+}
+
+/// Taux de reussite REEL par contexte et par passerelle, et seau perce
+/// d'elimination. Le contexte est « PAYS|METHODE|DEVISE » : un taux n'a de sens
+/// que la ou il a ete mesure.
+model RoutageScore {
+  id         String   @id @default(cuid())
+  contexte   String
+  passerelle String
+  reussis    Int      @default(0)
+  echoues    Int      @default(0)
+  /// Monte de 1 a chaque panne imputable au fournisseur, fuit avec le temps.
+  seau       Float    @default(0)
+  seauMaj    DateTime @default(now())
+  majLe      DateTime @default(now()) @updatedAt
+
+  @@unique([contexte, passerelle], map: "RoutageScore_cle")
+  @@index([contexte])
+}
+
+/// Adresses qui ne recoivent plus rien de notre part.
+///
+/// Un serveur distant qui repond « pas de boite a ce nom » le repondra a chaque
+/// fois : continuer d'ecrire abime la reputation du domaine expediteur, et
+/// chaque rejet ouvre une conversation dans le support (l'expediteur est
+/// support@cartflox.com). Seuls les rejets DEFINITIFS entrent ici : une boite
+/// pleine ou un refus de politique se retentent plus tard.
+model AdresseMorte {
+  email     String   @id
+  motif     String?
+  source    String?
+  createdAt DateTime @default(now())
+}

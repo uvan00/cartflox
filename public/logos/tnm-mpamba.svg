@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+  <rect width="120" height="40" rx="6" fill="#004B87"/>
+  <text x="10" y="16" font-family="Arial,sans-serif" font-size="11" font-weight="900" fill="white">TNM</text>
+  <text x="10" y="30" font-family="Arial,sans-serif" font-size="9" font-weight="600" fill="#FFD700">MPAMBA</text>
+  <rect x="82" y="5" width="32" height="30" rx="4" fill="white" opacity="0.1"/>
+  <text x="85" y="27" font-family="Arial,sans-serif" font-size="22" font-weight="900" fill="#FFD700">T</text>
+</svg>

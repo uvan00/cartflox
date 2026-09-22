@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Cartflox Connect">
+  <path d="M0 0 L24 0 L56 48 L24 96 L0 96 Z" fill="#0F766E"/>
+  <path d="M36 0 L96 0 L96 96 L36 96 L68 48 Z" fill="#12A594"/>
+  <circle cx="62" cy="48" r="15" fill="#0B1F1C"/>
+  <circle cx="62" cy="48" r="10.5" fill="#FFFFFF"/>
+  <circle cx="62" cy="48" r="4.5" fill="#12A594"/>
+</svg>
