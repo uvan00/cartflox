@@ -20,6 +20,8 @@ import {
     PaymentContext,
 } from "@/lib/orchestrator/routing-engine";
 import { sendPaymentConfirmationEmail, sendPaymentReceiptEmail, sendCredentialsRefusedEmail } from "@/lib/email";
+import { applyVerificationResult } from "@/lib/transaction-finalize";
+import { masquerSecrets } from "@/lib/secret";
 import { clePubliqueStripe } from "@/lib/stripe-cle-publique";
 import { DEVISES_SANS_CENTIMES } from "@/lib/devises";
 
@@ -90,7 +92,14 @@ async function refreshXofRatesIfStale(): Promise<void> {
         });
         const data = await res.json();
         if (data?.result === "success" && data.rates && typeof data.rates === "object") {
-            liveXofRates = { ...data.rates, XOF: 1 };
+            // Un cours vivant qui s'ecarte de plus de 20 % de la table de repli est
+            // suspect (API compromise ou en panne) : on garde la table pour lui.
+            const taux: Record<string, number> = { ...data.rates, XOF: 1 };
+            for (const [dev, ref] of Object.entries(XOF_RATES_FALLBACK)) {
+                const v = taux[dev];
+                if (typeof v !== "number" || !(v > 0) || !(ref > 0) || Math.abs(v / ref - 1) > 0.2) taux[dev] = ref;
+            }
+            liveXofRates = taux;
             liveXofRatesFetchedAt = Date.now();
         }
     } catch {
@@ -127,6 +136,9 @@ function convertCurrency(amount: number, fromCurrency: string, toCurrency: strin
     const brut = amountInXOF * rate;
     return DEVISES_SANS_CENTIMES.has(vers) ? Math.round(brut) : Math.round(brut * 100) / 100;
 }
+
+/** Reponse brute d'un fournisseur renvoyee au navigateur : jamais avec une cle en echo. */
+const brut = (v: any) => masquerSecrets(JSON.parse(JSON.stringify(v || {})));
 
 function extractProviderErrorMessage(rawData: any): string {
     if (!rawData) return '';
@@ -266,12 +278,15 @@ export async function POST(req: NextRequest) {
 
         // 3. Update customer details
         const existingMeta = (transaction.metadata as any) || {};
+        // Coordonnees : seulement celles fournies, bornees ; un tiers qui connait
+        // l'identifiant ne remplace pas l'adresse du recu par la sienne.
+        const champ = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
         await prisma.transaction.update({
             where: { id: transactionId },
             data: {
-                customerName: customerDetails.name,
-                customerPhone: customerDetails.phone,
-                customerEmail: customerDetails.email,
+                customerName: champ(customerDetails.name, 120),
+                customerPhone: champ(customerDetails.phone, 32),
+                customerEmail: champ(customerDetails.email, 160),
                 provider: gateway.name,
                 metadata: { ...existingMeta, methodCode, gatewayId }
             }
@@ -482,12 +497,9 @@ export async function POST(req: NextRequest) {
                 const config = gateway.config as any || {};
                 const hub2 = PaymentOrchestratorFactory.getProvider('hub2', buildAdapterConfig(gateway, config, 'hub2')) as Hub2Adapter;
                 const otpResponse = await hub2.submitOtp(transaction.providerRef, hub2PaymentId, customerDetails.otp);
-                if (otpResponse.status === 'SUCCESS') {
-                    await prisma.transaction.update({
-                        where: { id: transactionId },
-                        data: { status: 'SUCCESS', completedAt: new Date() }
-                    }).catch(() => {});
-                }
+                // Meme finalisation que le webhook et le cron : courriels, notification,
+                // webhook marchand (ecrire SUCCESS a la main les sautait).
+                if (otpResponse.status === 'SUCCESS') await applyVerificationResult(transaction, otpResponse, "initiate:otp").catch(() => {});
                 await (prisma as any).providerLog.create({
                     data: { transactionId, type: 'HUB2_OTP_SUBMIT', payload: JSON.parse(JSON.stringify(otpResponse.rawData || { status: otpResponse.status })) }
                 }).catch(() => {});
@@ -501,7 +513,7 @@ export async function POST(req: NextRequest) {
                         : otpResponse.status === 'FAILED' ? String((otpResponse.rawData as any)?.message || (otpResponse.rawData as any)?.error || 'Le paiement a été refusé.') : undefined,
                     providerReference: transaction.providerRef,
                     provider: gateway.name,
-                    rawData: JSON.parse(JSON.stringify(otpResponse.rawData || {}))
+                    rawData: brut(otpResponse.rawData)
                 });
             }
         }
@@ -513,12 +525,7 @@ export async function POST(req: NextRequest) {
             const adaptateur: any = PaymentOrchestratorFactory.getProvider(providerKey, buildAdapterConfig(gateway, (gateway.config as any) || {}, providerKey));
             if (typeof adaptateur.soumettreCode === 'function') {
                 const reponseCode = await adaptateur.soumettreCode(transaction.providerRef, customerDetails.otp);
-                if (reponseCode.status === 'SUCCESS') {
-                    await prisma.transaction.update({
-                        where: { id: transactionId },
-                        data: { status: 'SUCCESS', completedAt: new Date() }
-                    }).catch(() => {});
-                }
+                if (reponseCode.status === 'SUCCESS') await applyVerificationResult(transaction, reponseCode, "initiate:otp").catch(() => {});
                 await (prisma as any).providerLog.create({
                     data: { transactionId, type: 'OTP_SUBMIT', payload: JSON.parse(JSON.stringify(reponseCode.rawData || { status: reponseCode.status })) }
                 }).catch(() => {});
@@ -529,7 +536,7 @@ export async function POST(req: NextRequest) {
                     message: refuse ? String(reponseCode.rawData?.error || 'Code refusé, réessayez.') : undefined,
                     providerReference: transaction.providerRef,
                     provider: gateway.name,
-                    rawData: JSON.parse(JSON.stringify(reponseCode.rawData || {}))
+                    rawData: brut(reponseCode.rawData)
                 });
             }
         }
@@ -563,11 +570,8 @@ export async function POST(req: NextRequest) {
                 if (invoiceToken) {
                     const check = await adapter.verifyPayment(invoiceToken).catch(() => null);
                     if (check?.status === 'SUCCESS') {
-                        await prisma.transaction.update({
-                            where: { id: transactionId },
-                            data: { status: 'SUCCESS', completedAt: new Date() }
-                        }).catch(() => {});
-                        return NextResponse.json({ success: true, status: 'SUCCESS', rawData: check.rawData });
+                        await applyVerificationResult(transaction, check, "initiate:relecture").catch(() => {});
+                        return NextResponse.json({ success: true, status: 'SUCCESS', rawData: brut(check.rawData) });
                     }
                     // Re-create the invoice unless PayDunya confirmed it's still PENDING.
                     // Anything else (cancelled, failed, error, network) → fresh start.
@@ -657,12 +661,7 @@ export async function POST(req: NextRequest) {
                         }
                     }
 
-                    if (softPayResponse.status === 'SUCCESS') {
-                        await prisma.transaction.update({
-                            where: { id: transactionId },
-                            data: { status: 'SUCCESS', completedAt: new Date() }
-                        }).catch(() => {});
-                    }
+                    if (softPayResponse.status === 'SUCCESS') await applyVerificationResult(transaction, softPayResponse, "initiate:softpay").catch(() => {});
 
                     await (prisma as any).providerLog.create({
                         data: {
@@ -678,7 +677,7 @@ export async function POST(req: NextRequest) {
                             success: true,
                             status: isAlreadyInitiated ? 'REQUIRE_OTP' : softPayResponse.status,
                             redirectUrl: softPayResponse.checkoutUrl,
-                            rawData: JSON.parse(JSON.stringify(softPayResponse.rawData || {}))
+                            rawData: brut(softPayResponse.rawData)
                         });
                     }
 
@@ -711,11 +710,8 @@ export async function POST(req: NextRequest) {
             const existingAdapter = PaymentOrchestratorFactory.getProvider(providerKey, adapterConfig);
             const check = await existingAdapter.verifyPayment(transaction.providerRef).catch(() => null);
             if (check?.status === 'SUCCESS') {
-                await prisma.transaction.update({
-                    where: { id: transactionId },
-                    data: { status: 'SUCCESS', completedAt: new Date() }
-                }).catch(() => {});
-                return NextResponse.json({ success: true, status: 'SUCCESS', rawData: check.rawData });
+                await applyVerificationResult(transaction, check, "initiate:relecture").catch(() => {});
+                return NextResponse.json({ success: true, status: 'SUCCESS', rawData: brut(check.rawData) });
             }
         }
 
@@ -744,6 +740,14 @@ export async function POST(req: NextRequest) {
                 trialGateway = await prisma.gateway.findUnique({ where: { id: trialGwId } }).catch(() => null);
                 if (!trialGateway || trialGateway.status !== 'active') {
                     console.log(`⏭️ ROUTING: skip ${trialGwId} (not found or inactive)`);
+                    continue;
+                }
+                // Meme regle que la passerelle primaire : seulement une passerelle de
+                // l'espace. Les identifiants sont publics (la page de paiement les
+                // envoie) : sans ce controle, une configuration de routage faisait
+                // encaisser avec les cles d'un autre marchand.
+                if (!trialGateway.applicationId || trialGateway.applicationId !== transaction.applicationId) {
+                    console.log(`⏭️ ROUTING: skip ${trialGwId} (passerelle d'un autre espace)`);
                     continue;
                 }
             }
@@ -882,14 +886,16 @@ export async function POST(req: NextRequest) {
                         providerReference: initResponse.providerReference,
                         provider: trialGateway.name,
                         algorithm: engineConfig.algorithmKind,
-                        rawData: JSON.parse(JSON.stringify(initResponse.rawData || {}))
+                        rawData: brut(initResponse.rawData)
                     });
                 }
 
-                // Send payment notification emails (non-blocking)
+                // Succes immediat (Qosic...) : la finalisation ecrit le statut ET fait
+                // partir courriels, notification et webhook marchand. Avant, seuls les
+                // courriels partaient et la transaction restait PENDING jusqu'au cron.
                 const isDirectSuccess = !initResponse.checkoutUrl && initResponse.status === 'SUCCESS';
                 if (isDirectSuccess) {
-                    sendPaymentNotifications(transaction, trialGateway.name, customerDetails, (transaction.metadata as any)?.methodCode || methodCode, transaction.applicationId!).catch(() => {});
+                    await applyVerificationResult({ ...transaction, provider: trialGateway.name, providerRef: initResponse.providerReference || null }, initResponse, "initiate:direct").catch(() => {});
                 }
 
                 // Lien d'application (Wave, Djamo) : l'acheteur reste sur NOTRE page,
@@ -906,7 +912,7 @@ export async function POST(req: NextRequest) {
                         providerReference: initResponse.providerReference,
                         provider: trialGateway.name,
                         algorithm: engineConfig.algorithmKind,
-                        rawData: JSON.parse(JSON.stringify(initResponse.rawData || {}))
+                        rawData: brut(initResponse.rawData)
                     });
                 }
 
@@ -919,7 +925,7 @@ export async function POST(req: NextRequest) {
                         providerReference: initResponse.providerReference,
                         provider: trialGateway.name,
                         algorithm: engineConfig.algorithmKind,
-                        rawData: JSON.parse(JSON.stringify(initResponse.rawData || {}))
+                        rawData: brut(initResponse.rawData)
                     });
                 }
 
@@ -930,7 +936,7 @@ export async function POST(req: NextRequest) {
                     providerReference: initResponse.providerReference,
                     provider: trialGateway.name,
                     algorithm: engineConfig.algorithmKind,
-                    rawData: JSON.parse(JSON.stringify(initResponse.rawData || {}))
+                    rawData: brut(initResponse.rawData)
                 });
 
             } catch (err: any) {

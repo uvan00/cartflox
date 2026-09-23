@@ -41,15 +41,35 @@ export async function GET(req: NextRequest) {
     }
     const stalled = { count: annulees };
 
-    // 2. Mark expired (has providerRef + >24h) as FAILED
-    const expired = await prisma.transaction.updateMany({
+    // 2. Plus de 24 h avec une reference : une derniere relecture, puis abandon
+    // (CANCELLED + webhook payment.cancelled), au lieu d'un FAILED muet.
+    const trop = await prisma.transaction.findMany({
         where: { status: "PENDING", ...avecReference, createdAt: { lt: twentyFourHoursAgo } },
-        data: { status: "FAILED" },
+        orderBy: { updatedAt: "asc" },
+        take: 100,
     });
+    let expires = 0;
+    for (const tx of trop) {
+        try {
+            const adapter = await getAdapterForTransaction(tx);
+            const verification = adapter ? await adapter.verifyPayment(tx.providerRef!).catch(() => null) : null;
+            if (verification && !verification.rawData?.error && verification.status !== "PENDING") {
+                await applyVerificationResult(tx, verification, "cron:expiration");
+                continue;
+            }
+            if (await annulerAbandon(tx.id, "en attente depuis plus de 24 h").catch(() => false)) expires++;
+        } catch (err: unknown) {
+            logger.warn("[cron:sync-pending] expiration", { txId: tx.id, err: String(err) });
+        }
+    }
+    const expired = { count: expires };
 
-    // 3. Sync remaining PENDING (has providerRef + >5min) with provider
+    // 3. Sync remaining PENDING (has providerRef + >5min) with provider, les
+    // moins recemment relues d'abord : chaque relecture touche updatedAt, donc
+    // au-dela de 50 en attente, toutes finissent par etre relues.
     const pending = await prisma.transaction.findMany({
         where: { status: "PENDING", ...avecReference, createdAt: { lt: fiveMinutesAgo } },
+        orderBy: { updatedAt: "asc" },
         take: 50,
     });
 
@@ -76,7 +96,10 @@ export async function GET(req: NextRequest) {
             // Shared finalize: status update with downgrade/transport-error
             // guards + notification, emails and outgoing merchant webhook.
             const updated = await applyVerificationResult(tx, verification, "cron");
-            if (updated.status === tx.status) continue;
+            if (updated.status === tx.status) {
+                await prisma.transaction.updateMany({ where: { id: tx.id, status: "PENDING" }, data: { updatedAt: new Date() } }).catch(() => { });
+                continue;
+            }
 
             if (updated.status === "SUCCESS") newSuccess++;
             else if (updated.status === "FAILED") newFailed++;

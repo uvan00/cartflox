@@ -44,7 +44,11 @@ export function porteeDePasserelle(gateway: { applicationId?: string | null } | 
 export function decryptSecret<T>(v: T, portee?: string): T {
     if (isEncrypted(v as any)) {
         const d = safeDecrypt(v as any, portee);
-        return (d == null ? v : (d as any));
+        // Indechiffrable (portee changee, secret maitre tourne) : une chaine vide
+        // fait refuser l'authentification chez le fournisseur avec un motif clair,
+        // la ou le chiffre envoye tel quel passait pour une cle fausse.
+        if (d == null) { console.error("[cles] valeur indechiffrable : passerelle a ressaisir"); return "" as any; }
+        return d as any;
     }
     return v;
 }

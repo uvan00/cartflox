@@ -51,8 +51,15 @@ export async function rembourserTransaction(transactionId: string, appId: string
             currency: tx.currency
         });
     } catch (e: any) {
-        await revertClaim();
-        return { error: e?.message || "Échec du remboursement (provider)" };
+        // Delai depasse ou panne APRES un ordre peut-etre parti : revenir a SUCCESS
+        // proposait un second remboursement. On garde REFUNDED avec un etat
+        // « indetermine » ; le journal fournisseur tranche.
+        const meta: any = (tx.metadata as any) || {};
+        await prisma.transaction.update({
+            where: { id: tx.id },
+            data: { metadata: { ...meta, refund: { status: "indetermine", erreur: String(e?.message || e).slice(0, 300), quand: new Date().toISOString() } } as any },
+        }).catch(() => { });
+        return { error: "Le fournisseur n'a pas répondu. Le remboursement est marqué à vérifier : ne le relancez pas, écrivez au support." };
     }
 
     try {

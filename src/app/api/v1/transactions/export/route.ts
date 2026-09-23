@@ -85,7 +85,9 @@ export async function GET(req: NextRequest) {
             (tx as any).completedAt ? new Date((tx as any).completedAt).toISOString() : "",
         ]);
 
-        const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+        // Une cellule qui commence par =, +, - ou @ serait executee comme formule
+        // par un tableur : on la prefixe d'une apostrophe.
+        const escape = (v: string) => `"${(/^[=+\-@]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
         const csvLines = [
             headers.map(escape).join(","),
             ...rows.map((row) => row.map(escape).join(",")),

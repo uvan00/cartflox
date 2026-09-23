@@ -121,8 +121,10 @@ export class QosicAdapter implements IPaymentProvider {
             let status: PaymentStatus = 'PENDING';
             if (data.responsecode === '00') {
                 status = 'SUCCESS';
-            } else if (data.responsecode === '01') {
+            } else if (data.responsecode === '01' || data.responsecode == null) {
+                // Sans code de reponse (401, panne), ce n'est pas un echec de paiement.
                 status = 'PENDING';
+                if (data.responsecode == null) data.error = data.error || data.message || `Qosic : HTTP ${response.status} sans code de réponse`;
             } else {
                 status = 'FAILED';
             }

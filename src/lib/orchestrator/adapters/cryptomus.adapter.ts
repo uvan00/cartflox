@@ -121,8 +121,11 @@ export class CryptomusAdapter implements IPaymentProvider {
             switch (paymentStatus) {
                 case 'paid':
                 case 'paid_over':
-                case 'confirm_check':
                     status = 'SUCCESS';
+                    break;
+                // confirm_check : detecte sur le reseau, pas encore confirme.
+                case 'confirm_check':
+                    status = 'PENDING';
                     break;
                 case 'fail':
                 case 'cancel':

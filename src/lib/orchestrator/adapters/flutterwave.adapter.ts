@@ -308,12 +308,14 @@ export class FlutterwaveAdapter implements IPaymentProvider {
 
             const data: FlutterwavePaymentResponse = await response.json();
 
+            // Reponse d'API (« No transaction was found » tant que l'acheteur n'a pas
+            // tente, cle refusee...) : on reste en attente avec le motif, pas un echec.
             if (data.status !== 'success') {
                 return {
                     transactionId: providerReference,
                     providerReference,
-                    status: 'FAILED' as PaymentStatus,
-                    rawData: data,
+                    status: 'PENDING' as PaymentStatus,
+                    rawData: { ...(data as any), error: (data as any)?.message || 'Flutterwave : réponse sans statut de transaction' },
                 };
             }
 

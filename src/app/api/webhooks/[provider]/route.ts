@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaymentOrchestratorFactory } from "@/lib/orchestrator/factory";
 import prisma from "@/lib/db";
 import { overlayTestKeys, decryptSecret, porteeDePasserelle } from "@/lib/gateway-credentials";
-import { sendPaymentSuccessEmails, dispatchOutgoingStatusWebhook } from "@/lib/transaction-finalize";
+import { applyVerificationResult } from "@/lib/transaction-finalize";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { verifyWebhookSignature } from "@/lib/webhook-verify";
 import { buildAdapterConfig } from "@/lib/orchestrator/executor";
 import { createNotification } from "@/lib/notifications";
-import { safeDecrypt } from "@/lib/crypto";
 import logger from "@/lib/logger";
 
 /**
@@ -19,6 +19,11 @@ export async function POST(
     { params }: { params: Promise<{ provider: string }> }
 ) {
     const { provider: providerName } = await params;
+    // Chaque appel ecrit une ligne de journal et peut interroger l'API du
+    // fournisseur avec les cles du marchand : une limite par connexion evite
+    // qu'un tiers fasse bannir le marchand chez son agregateur.
+    const limite = await rateLimit(`webhook:${getClientIp(req)}:${providerName.toLowerCase()}`, { limit: 120, windowSec: 60 });
+    if (!limite.allowed) return NextResponse.json({ received: false, error: "Too many requests" }, { status: 429 });
     // Read raw body once for signature verification
     const rawBody = await req.text();
     const headers = Object.fromEntries(req.headers.entries());
@@ -223,124 +228,54 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
             return NextResponse.json({ received: true, ignored: "superseded_intent" });
         }
 
-        // SECURITY: terminal states are locked. A late or forged webhook must
-        // never resurrect a REFUNDED/CANCELLED transaction, nor downgrade a
-        // finalized SUCCESS (replayed / out-of-order webhook).
-        if (record.status === 'REFUNDED' || record.status === 'CANCELLED') {
-            logger.info("[webhook] ignored — transaction in locked terminal state", { txId: record.id, status: record.status, incoming: result.status, provider: providerName });
-            return NextResponse.json({ received: true, ignored: "locked_terminal" });
-        }
-        if (record.status === 'SUCCESS' && result.status !== 'SUCCESS') {
-            logger.info("[webhook] ignored downgrade attempt", { txId: record.id, incoming: result.status, provider: providerName });
-            return NextResponse.json({ received: true, ignored: "already_success" });
-        }
-        // Idempotency: webhook reports the status we already hold → no-op.
+        // Un statut deja tenu : rien a faire (idempotence).
         if (record.status === result.status) {
             return NextResponse.json({ received: true, ignored: "no_change" });
         }
 
-        // SECURITY (forgery defense): when the cryptographic signature was NOT
-        // proven (sigValid !== true), the payload is attacker-controllable. Any
-        // SUCCESS claim MUST be re-confirmed against the provider's own API
-        // before we credit anything. This neutralizes forged "payment success"
-        // webhooks even for providers that ship no HMAC (PayDunya, FeexPay,
-        // FedaPay, LengoPay, and unknown providers).
-        if (result.status === 'SUCCESS' && sigValid !== true) {
-            const ref = result.providerReference || (record as any).providerRef || potentialRef;
-            try {
-                const verified = await provider.verifyPayment(ref);
-                if (verified.status !== 'SUCCESS') {
-                    logger.warn("[webhook] SUCCESS claim NOT confirmed by provider API — rejecting", { txId: record.id, provider: providerName, providerStatus: verified.status });
+        // SECURITE : quand la signature n'est pas prouvee, le corps est ecrit par
+        // qui veut. On ne le croit pour RIEN : l'etat est relu aupres du fournisseur
+        // sur NOTRE reference (celle posee a l'initiation), jamais sur une reference
+        // prise dans le corps. Avant, le succes d'un petit paiement d'un autre
+        // acheteur, cite dans le corps, confirmait n'importe quelle commande ; et un
+        // echec forge faisait echouer un paiement en cours. Sans reference, un succes
+        // est invérifiable (refus) et un echec attend le sondage.
+        let resultat = result;
+        if (sigValid !== true) {
+            if (!record.providerRef) {
+                if (result.status === 'SUCCESS') {
+                    logger.warn("[webhook] succes non signe sans reference fournisseur : refuse", { txId: record.id, provider: providerName });
                     return NextResponse.json({ received: true, ignored: "unverified_success" }, { status: 202 });
                 }
+                return NextResponse.json({ received: true, ignored: "unsigned_without_reference" }, { status: 202 });
+            }
+            try {
+                const verified = await provider.verifyPayment(record.providerRef);
+                if (!verified || verified.rawData?.error) {
+                    logger.warn("[webhook] relecture impossible aupres du fournisseur", { txId: record.id, provider: providerName, error: verified?.rawData?.error });
+                    return NextResponse.json({ received: false, error: "Unverifiable payment" }, { status: 400 });
+                }
+                if (result.status === 'SUCCESS' && verified.status !== 'SUCCESS') {
+                    logger.warn("[webhook] succes annonce, non confirme par le fournisseur : refuse", { txId: record.id, provider: providerName, providerStatus: verified.status });
+                }
+                resultat = { ...verified, providerReference: record.providerRef, rawData: verified.rawData ?? {} };
             } catch (e: any) {
-                logger.warn("[webhook] could not re-verify SUCCESS with provider — rejecting", { txId: record.id, provider: providerName, error: e?.message });
+                logger.warn("[webhook] relecture en erreur : refuse", { txId: record.id, provider: providerName, error: e?.message });
                 return NextResponse.json({ received: false, error: "Unverifiable payment" }, { status: 400 });
             }
-        }
-
-        // Best-effort amount sanity check (log only — provider amount units vary
-        // across gateways, so we never auto-fail here to avoid breaking real
-        // revenue; proper enforcement needs per-adapter amount normalization).
-        if (result.status === 'SUCCESS') {
-            const paid = extractPaidAmount(payload);
-            if (paid != null && paid > 0 && paid < record.amount * 0.5) {
-                logger.warn("[webhook] reported paid amount well below expected — review", { txId: record.id, expected: record.amount, reported: paid, provider: providerName });
+            if (record.status === resultat.status) {
+                return NextResponse.json({ received: true, ignored: "no_change" });
             }
         }
 
-        // 5. Atomic conditional update — only transition out of a non-terminal
-        // state, so a concurrent cron/poll reconciler cannot cause a lost update
-        // or double-fire the SUCCESS side effects below.
-        const upd = await prisma.transaction.updateMany({
-            where: { id: record.id, status: { notIn: ['SUCCESS', 'REFUNDED', 'CANCELLED'] } },
-            data: {
-                status: result.status as any,
-                updatedAt: new Date(),
-                ...(result.status === 'SUCCESS' ? { completedAt: new Date() } : {}),
-            }
-        });
-        if (upd.count === 0) {
-            logger.info("[webhook] already finalized by another path — skipping side effects", { txId: record.id, provider: providerName });
-            return NextResponse.json({ received: true, ignored: "already_finalized" });
+        // Transition et effets (courriels, notification, webhook sortant, piste de
+        // routage) au meme endroit que le sondage et le cron : verrous d'etat
+        // compris (un succes confirme rattrape un CANCELLED).
+        const updated = await applyVerificationResult(record, resultat, `webhook:${providerName.toLowerCase()}`);
+        if (updated.status === record.status) {
+            return NextResponse.json({ received: true, ignored: "no_transition" });
         }
-        const updatedRecord = (await prisma.transaction.findUnique({ where: { id: record.id } }))!;
-
-        logger.info("[webhook] tx updated", { txId: result.transactionId, status: result.status, provider: providerName });
-
-        // Update routing-decision audit log so the dashboard reflects the
-        // final outcome instead of staying at PENDING.
-        if (result.status === 'SUCCESS' || result.status === 'FAILED' || result.status === 'CANCELLED') {
-            (async () => {
-                try {
-                    const { updateDecisionOutcome } = await import('@/lib/routing-audit');
-                    await updateDecisionOutcome(record.id, result.status as 'SUCCESS' | 'FAILED' | 'CANCELLED');
-                } catch { /* ignore */ }
-            })();
-        }
-
-        // 5b. On SUCCESS: send emails + create in-app notification
-        if (result.status === 'SUCCESS' && record.applicationId) {
-            sendPaymentSuccessEmails(updatedRecord, providerName, record.applicationId).catch(() => {});
-
-            // In-app notification for merchant
-            const app = await prisma.application.findUnique({
-                where: { id: record.applicationId },
-                select: { userId: true, name: true }
-            });
-            if (app?.userId) {
-                createNotification({
-                    userId: app.userId,
-                    type: "payment",
-                    title: "Paiement reçu",
-                    body: `Paiement de ${updatedRecord.amount.toLocaleString()} ${updatedRecord.currency} via ${providerName} (commande ${updatedRecord.orderId})`,
-                    link: `/transactions/${updatedRecord.id}`,
-                }).catch(() => {});
-            }
-        }
-
-        if (result.status === 'FAILED' && record.applicationId) {
-            const app = await prisma.application.findUnique({
-                where: { id: record.applicationId },
-                select: { userId: true }
-            });
-            if (app?.userId) {
-                createNotification({
-                    userId: app.userId,
-                    type: "payment",
-                    title: "Paiement échoué",
-                    body: `Paiement de ${updatedRecord.amount.toLocaleString()} ${updatedRecord.currency} via ${providerName} a échoué (commande ${updatedRecord.orderId})`,
-                    link: `/transactions/${updatedRecord.id}`,
-                }).catch(() => {});
-            }
-        }
-
-        // 6. Webhook sortant vers le serveur du marchand : journalise dans
-        // WebhookDelivery et rejoue par le cron jusqu'a 10 fois sur 72 h.
-        if (record.applicationId) {
-            dispatchOutgoingStatusWebhook(updatedRecord, result.status, providerName, result.providerReference).catch(() => {});
-        }
-
+        logger.info("[webhook] tx updated", { txId: record.id, status: updated.status, provider: providerName });
         return NextResponse.json({ received: true });
 
     } catch (error: any) {
@@ -350,19 +285,6 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
             error: error.message || "Webhook processing failed"
         }, { status: 400 });
     }
-}
-
-/**
- * Best-effort extraction of the paid amount from a heterogeneous provider
- * payload. Used only for a log-level sanity check (units differ per provider).
- */
-function extractPaidAmount(payload: any): number | null {
-    const p = payload?.data || payload;
-    const cand = p?.amount ?? p?.amount_total ?? p?.total ?? p?.value
-        ?? p?.invoice?.total_amount ?? p?.amountPaid ?? p?.paidAmount ?? p?.cpm_amount;
-    if (cand == null) return null;
-    const n = typeof cand === "string" ? parseFloat(cand.replace(/[^\d.]/g, "")) : Number(cand);
-    return Number.isFinite(n) ? n : null;
 }
 
 /**

@@ -1,31 +1,19 @@
 import { NextResponse } from "next/server";
-import pg from "pg";
+import prisma from "@/lib/db";
 
+/** Etat de l'application et de sa base, par le client Prisma partage (pas un pool par appel). */
 export async function GET() {
     const start = Date.now();
     let dbStatus = "ok";
     let dbLatencyMs = 0;
-
-    const pool = new pg.Pool({
-        connectionString: process.env.DATABASE_URL,
-        max: 1,
-        idleTimeoutMillis: 5000,
-    });
-
     try {
         const t = Date.now();
-        const client = await pool.connect();
-        await client.query("SELECT 1");
-        client.release();
+        await prisma.$queryRaw`SELECT 1`;
         dbLatencyMs = Date.now() - t;
     } catch {
         dbStatus = "error";
-    } finally {
-        await pool.end().catch(() => {});
     }
-
     const healthy = dbStatus === "ok";
-
     return NextResponse.json(
         {
             status: healthy ? "ok" : "degraded",

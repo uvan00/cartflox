@@ -59,8 +59,10 @@ export class PayTechAdapter implements IPaymentProvider {
         const brut = String(
             data?.type_event || data?.status || data?.payment_status || data?.state || data?.data?.status || data?.payment?.status || ''
         ).toLowerCase();
-        if (/sale_complete|success|succ[eè]s|paid|pay[eé]|complete|valid/.test(brut)) return 'SUCCESS';
-        if (/cancel|annul|fail|[eé]chec|[eé]chou|reject|refus|expir/.test(brut)) return 'FAILED';
+        // L'echec d'abord : « unpaid », « not_paid », « invalid_token » contiennent
+        // « paid » et « valid », ils tombaient en succes.
+        if (/cancel|annul|fail|[eé]chec|[eé]chou|reject|refus|expir|unpaid|not_?paid|invalid/.test(brut)) return 'FAILED';
+        if (/^(sale_complete|success|succ[eè]s|paid|pay[eé]e?|completed?|valid|validated)$/.test(brut)) return 'SUCCESS';
         return 'PENDING';
     }
 

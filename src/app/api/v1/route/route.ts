@@ -86,7 +86,8 @@ export async function POST(req: NextRequest) {
             rankedProviders,
         });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("[v1:route]", error?.message);
+        return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }
 
@@ -96,6 +97,8 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
     try {
+        const limite = await rateLimit(`route-get:${getClientIp(req)}`, { limit: 60, windowSec: 60 });
+        if (!limite.allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
         const { searchParams } = new URL(req.url);
         const country = searchParams.get('country');
         const currency = searchParams.get('currency') ?? undefined;
@@ -119,6 +122,7 @@ export async function GET(req: NextRequest) {
             rankedProviders,
         });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("[v1:route]", error?.message);
+        return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }

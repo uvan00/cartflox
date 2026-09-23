@@ -218,7 +218,9 @@ export class PaystackAdapter implements IPaymentProvider {
 
             return {
                 transactionId: reference,
-                providerReference: data.data.access_code || reference,
+                // La reference (PSK_...) : c'est elle que verify et le webhook citent ;
+                // l'access_code de la page hebergee ne se retrouve nulle part.
+                providerReference: reference,
                 status: 'PENDING' as PaymentStatus,
                 checkoutUrl: data.data.authorization_url,
                 rawData: data,
@@ -315,12 +317,14 @@ export class PaystackAdapter implements IPaymentProvider {
 
             const data: PaystackTransactionResponse = await response.json();
 
+            // `status: false` = reponse d'API (cle refusee, limite, reference encore
+            // inconnue tant que l'acheteur n'a rien tente), pas un echec de paiement.
             if (!data.status) {
                 return {
                     transactionId: providerReference,
                     providerReference,
-                    status: 'FAILED' as PaymentStatus,
-                    rawData: data,
+                    status: 'PENDING' as PaymentStatus,
+                    rawData: { ...(data as any), error: (data as any)?.message || 'Paystack : réponse sans statut de transaction' },
                 };
             }
 

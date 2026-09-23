@@ -94,9 +94,19 @@ export async function POST(req: NextRequest) {
             merchant,
         } = body;
 
-        if (!amount || amount <= 0) {
-            return NextResponse.json({ error: 'amount is required and must be > 0' }, { status: 400 });
+        if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+            return NextResponse.json({ error: 'amount is required and must be a number > 0' }, { status: 400 });
         }
+        if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency)) {
+            return NextResponse.json({ error: 'currency must be a 3-letter code' }, { status: 400 });
+        }
+        // Une adresse de retour est http(s) ou rien : la page de succes la suit telle quelle.
+        const urlSure = (u: unknown) => typeof u === "string" && u.length <= 2000 && /^https?:\/\/[^\s"'<>]+$/i.test(u) ? u : null;
+        const successUrlSure = urlSure(success_url);
+        const cancelUrlSure = urlSure(cancel_url);
+        const nomClient = String(customer_name ?? "").replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim().slice(0, 80);
+        const emailClient = String(customer_email ?? "").trim().slice(0, 160);
+        const telClient = String(customer_phone ?? "").trim().slice(0, 32);
 
         // --- Create Transaction ---
         const orderId = `CS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
@@ -122,7 +132,10 @@ export async function POST(req: NextRequest) {
         const nomAffiche = String(merchant_name ?? merchant?.name ?? "").trim().slice(0, 60);
         const logoBrut = String(merchant_logo ?? merchant?.logo ?? "").trim().slice(0, 500);
         const logoAffiche = /^https:\/\/[^\s"'<>]+$/i.test(logoBrut) ? logoBrut : "";
-        const marchandSession = (nomAffiche || logoAffiche)
+        // Reserve a la cle SECRETE : avec la cle publique (visible dans la page du
+        // marchand), n'importe qui habillerait une page de paiement a l'enseigne
+        // d'une autre marque sur notre domaine.
+        const marchandSession = !viaClePublique && (nomAffiche || logoAffiche)
             ? { marchand: { ...(nomAffiche ? { nom: nomAffiche } : {}), ...(logoAffiche ? { logo: logoAffiche } : {}) } }
             : {};
 
@@ -150,22 +163,27 @@ export async function POST(req: NextRequest) {
                 status: 'PENDING',
                 // customerName/customerEmail are NOT NULL columns — default to ""
                 // (passing null throws at runtime). customerPhone is nullable.
-                customerName: customer_name || "",
-                customerEmail: customer_email || "",
-                customerPhone: customer_phone || null,
+                customerName: nomClient,
+                customerEmail: emailClient,
+                customerPhone: telClient || null,
                 paymentType: 'MOBILE_MONEY',
                 provider: '',
                 metadata: {
+                    // Les metadonnees du marchand D'ABORD : les cles reservees ci-dessous
+                    // font foi. Ecrites avant, `source`, `frais_service`, `sandbox` ou
+                    // `gatewayId` pouvaient etre reecrites par l'appelant (frais de
+                    // service, passerelle, echec ou remboursement inventes).
+                    ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
                     source: viaClePublique ? 'widget' : 'checkout_session',
-                    ...(enTest ? { sandbox: true } : {}),
-                    description: description || null,
+                    ...(enTest ? { sandbox: true } : { sandbox: undefined }),
+                    description: typeof description === "string" ? description.slice(0, 500) : null,
                     // Ce que le marchand a demandé, et ce qu'on a ajouté pour lui.
-                    ...(fraisService > 0 ? { base_marchand: baseMontant, frais_service: fraisService } : {}),
-                    success_url: success_url || null,
-                    cancel_url: cancel_url || null,
+                    ...(fraisService > 0 ? { base_marchand: baseMontant, frais_service: fraisService } : { base_marchand: undefined, frais_service: undefined }),
+                    success_url: successUrlSure,
+                    cancel_url: cancelUrlSure,
+                    marchand: undefined,
                     ...marchandSession,
-                    ...(metadata || {}),
-                    // Apres les metadonnees du marchand : la cle d'idempotence de l'en-tete fait foi.
+                    gatewayId: undefined, echec: undefined, refund: undefined,
                     ...(idempotencyKey ? { idempotencyKey } : {}),
                 } as any
             }

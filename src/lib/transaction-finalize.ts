@@ -107,12 +107,18 @@ export async function applyVerificationResult(
             txId: tx.id, source,
         });
     }
-    if (tx.status === "SUCCESS" && verification.status !== "SUCCESS") {
+    // Un remboursement CONFIRME par le fournisseur (webhook Stripe signe) est le
+    // seul chemin qui sorte de SUCCESS.
+    const remboursementConfirme = String(verification.status) === "REFUNDED" && source === "stripe-webhook";
+    if (tx.status === "SUCCESS" && verification.status !== "SUCCESS" && !remboursementConfirme) {
         logger.info("[tx-finalize] ignored downgrade attempt", {
             txId: tx.id, incoming: verification.status, source,
         });
         return tx;
     }
+    // Un « en attente » entrant ne fait pas revenir un echec : le fournisseur
+    // qui repond « inconnu » a une relecture ne rouvre pas un FAILED.
+    if (verification.status === "PENDING" && tx.status !== "PENDING") return tx;
 
     // ATOMIC: only transition out of a non-terminal state. If another path
     // (webhook/cron/poll) finalized first, count===0 and we skip the duplicate
@@ -123,7 +129,9 @@ export async function applyVerificationResult(
             // On ne sort de CANCELLED que pour un succes confirme (cf. ci-dessus).
             status: verification.status === "SUCCESS"
                 ? { notIn: ["SUCCESS", "REFUNDED"] }
-                : { notIn: ["SUCCESS", "REFUNDED", "CANCELLED"] },
+                : String(verification.status) === "REFUNDED"
+                    ? { in: ["SUCCESS", "PENDING", "FAILED"] }
+                    : { notIn: ["SUCCESS", "REFUNDED", "CANCELLED"] },
         },
         data: {
             status: verification.status as any,
@@ -203,6 +211,11 @@ export async function applyVerificationResult(
             notifyMerchant(updated, {
                 title: "Paiement reçu",
                 body: `Paiement de ${updated.amount.toLocaleString("fr-FR")} ${updated.currency} via ${tx.provider} (commande ${updated.orderId})`,
+            }).catch(() => {});
+        } else if (String(verification.status) === "REFUNDED") {
+            notifyMerchant(updated, {
+                title: "Paiement remboursé",
+                body: `Paiement de ${updated.amount.toLocaleString("fr-FR")} ${updated.currency} via ${tx.provider} remboursé (commande ${updated.orderId})`,
             }).catch(() => {});
         } else if (verification.status === "FAILED") {
             notifyMerchant(updated, {

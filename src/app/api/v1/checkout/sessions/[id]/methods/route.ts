@@ -48,7 +48,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         }
 
         const tx = await prisma.transaction.findUnique({ where: { id } });
-        if (!tx || tx.applicationId !== auth.applicationId) {
+        // Une cle de test ne voit que des sessions de test, et inversement.
+        if (!tx || tx.applicationId !== auth.applicationId || ((tx as any).test === true) !== auth.test) {
             return NextResponse.json({ error: "Session introuvable" }, { status: 404, headers: getCorsHeaders(origin, null) });
         }
 
