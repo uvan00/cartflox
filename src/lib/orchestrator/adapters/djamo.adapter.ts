@@ -45,11 +45,13 @@ export class DjamoAdapter implements IPaymentProvider {
     }
 
     private entetes() {
+        const token = String(this.config.token || '').trim();
+        const companyId = String(this.config.companyId || '').trim();
         return {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'Authorization': `Bearer ${this.config.token || ''}`,
-            ...(this.config.companyId ? { 'X-company-Id': this.config.companyId } : {}),
+            'Authorization': `Bearer ${token}`,
+            ...(companyId ? { 'X-Company-Id': companyId } : {}),
         };
     }
 
@@ -66,6 +68,41 @@ export class DjamoAdapter implements IPaymentProvider {
         if (Array.isArray(m)) return m.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
         if (m && typeof m === 'object') return JSON.stringify(m);
         return typeof m === 'string' ? m : '';
+    }
+
+    /**
+     * Lit la reponse. Devant l'API, Djamo a un pare-feu Cloudflare qui repond
+     * 403 avec une page HTML (« Sorry, you have been blocked ») quand l'adresse
+     * IP de l'appelant n'est pas admise, ce qui arrive surtout sur staging. Ce
+     * 403 ne dit RIEN des cles : on le distingue du 403 JSON de l'API.
+     */
+    private async lire(reponse: Response): Promise<{ data: any; bloque: boolean }> {
+        const texte = await reponse.text().catch(() => '');
+        let data: any = {};
+        try { data = texte ? JSON.parse(texte) : {}; } catch { data = {}; }
+        const html = /^\s*</.test(texte) || /text\/html/i.test(reponse.headers.get('content-type') || '');
+        const bloque = reponse.status === 403 && html && /cloudflare|you have been blocked|attention required/i.test(texte);
+        return { data, bloque };
+    }
+
+    private get environnement() {
+        return this.config.mode === 'test' ? 'test (staging)' : 'production';
+    }
+
+    /** Message lisible pour un refus d'acces (401, 403, blocage du pare-feu). */
+    private refus(status: number, data: any, bloque: boolean): string {
+        if (bloque) {
+            return `le pare-feu de Djamo bloque l'adresse IP de votre serveur sur l'environnement ${this.environnement} `
+                + `(${this.base.replace(/\/v1$/, '')}). Vos clés ne sont pas en cause : demandez à Djamo d'autoriser l'adresse IP publique de votre serveur`;
+        }
+        const detail = this.message(data) || String(status);
+        if (status === 401) {
+            const conseil = this.config.mode === 'test'
+                ? "Si Djamo vous a remis des clés de production, choisissez le mode Live"
+                : "Si ce sont les clés de test remises par Djamo, choisissez le mode Test : elles ne fonctionnent que sur staging";
+            return `Djamo ne reconnaît pas cet Access Token en ${this.environnement} (${detail}). ${conseil}`;
+        }
+        return `Djamo refuse l'accès avec ces identifiants (${detail}) : vérifiez le Company ID et les droits du token`;
     }
 
     async initiatePayment(request: PaymentRequest): Promise<PaymentResponse> {
@@ -86,9 +123,9 @@ export class DjamoAdapter implements IPaymentProvider {
             const reponse = await fetch(`${this.base}/charges`, {
                 method: 'POST', headers: this.entetes(), body: JSON.stringify(corps), signal: AbortSignal.timeout(20000),
             });
-            const data: any = await reponse.json().catch(() => ({}));
+            const { data, bloque } = await this.lire(reponse);
             if (reponse.status === 401 || reponse.status === 403) {
-                return echec(`Djamo a refusé les identifiants (${this.message(data) || reponse.status})`, data);
+                return echec(this.refus(reponse.status, data, bloque), data);
             }
             const d = data?.data || data || {};
             if (!reponse.ok || !d.paymentUrl) {
@@ -113,10 +150,11 @@ export class DjamoAdapter implements IPaymentProvider {
             const reponse = await fetch(`${this.base}/charges/${encodeURIComponent(providerReference)}`, {
                 headers: this.entetes(), signal: AbortSignal.timeout(20000),
             });
-            const data: any = await reponse.json().catch(() => ({}));
+            const { data, bloque } = await this.lire(reponse);
             const d = data?.data || data || {};
             if (!reponse.ok) {
-                return { transactionId: providerReference, providerReference, status: 'PENDING', rawData: { ...data, error: this.message(data) || `Djamo a répondu ${reponse.status}` } };
+                const error = bloque || reponse.status === 401 ? this.refus(reponse.status, data, bloque) : (this.message(data) || `Djamo a répondu ${reponse.status}`);
+                return { transactionId: providerReference, providerReference, status: 'PENDING', rawData: { ...data, error } };
             }
             return {
                 transactionId: d.externalId || providerReference,
@@ -141,13 +179,15 @@ export class DjamoAdapter implements IPaymentProvider {
     }
 
     async validateCredentials(): Promise<{ success: boolean; message?: string }> {
-        if (!this.config.token) return { success: false, message: 'Access Token Djamo requis' };
+        const token = String(this.config.token || '').trim();
+        if (!token) return { success: false, message: 'Access Token Djamo requis' };
+        if (!String(this.config.companyId || '').trim()) return { success: false, message: 'Company ID Djamo requis' };
         try {
             // Une demande inexistante : seul le refus d'authentification compte.
             const reponse = await fetch(`${this.base}/charges/cartflox-verification`, { headers: this.entetes(), signal: AbortSignal.timeout(15000) });
             if (reponse.status === 401 || reponse.status === 403) {
-                const data: any = await reponse.json().catch(() => ({}));
-                return { success: false, message: `Djamo refuse ces identifiants (${this.message(data) || reponse.status})` };
+                const { data, bloque } = await this.lire(reponse);
+                return { success: false, message: this.refus(reponse.status, data, bloque) };
             }
             return { success: true };
         } catch (error: any) {
