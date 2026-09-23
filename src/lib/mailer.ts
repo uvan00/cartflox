@@ -106,7 +106,7 @@ async function destinatairesJoignables(destinataires: { email: string }[]): Prom
     return { gardes, ecartes };
 }
 
-let transportSmtp: nodemailer.Transporter | null = null;
+let transportSmtp: ReturnType<typeof nodemailer.createTransport> | null = null;
 function smtp() {
     if (!transportSmtp) {
         transportSmtp = nodemailer.createTransport({
