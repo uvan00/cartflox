@@ -389,7 +389,6 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
         { name: "T-Money Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "tmoney-tg-hub2", logo: "/icons/methods/togocel.svg" },
         { name: "Moov Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "moov-tg-hub2", logo: "/icons/methods/moov_money.svg" },
         { name: "MTN Cameroun", country: "Cameroun", flag: "CM", type: "MOBILE_MONEY", code: "mtn-cm-hub2", logo: "/icons/methods/momo.svg" },
-        { name: "MTN Ghana", country: "Ghana", flag: "GH", type: "MOBILE_MONEY", code: "mtn-gh-hub2", logo: "/icons/methods/momo.svg" },
     ],
     'lengopay': [
         { name: "Orange Money Guinée", country: "Guinée", flag: "GN", type: "MOBILE_MONEY", code: "orange-gn-lengopay", logo: "/icons/methods/orange_money.svg" },

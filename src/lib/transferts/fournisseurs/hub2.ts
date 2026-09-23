@@ -4,16 +4,17 @@ import { DELAI_MS, injoignable, lireJson, refus, type Fournisseur, type PayoutRe
  * Hub2 « Transfers » : un seul appel, POST /transfers, puis
  * GET /transfers/{id}/status. Un compte marchand PAR PAYS : les en-tetes
  * viennent du compte du pays vise. Documentation : docs.hub2.io/integration/en/transfers
+ * Noms d'operateurs de Hub2 (GET /data/providers?country=XX) : T-Money y est
+ * « Togocell », Moov Mali « Mobicash », et Hub2 n'ouvre pas le Ghana.
  */
 const FOURNISSEURS: Record<string, Record<string, string>> = {
     CI: { orange_money: "orange", mtn_money: "mtn", moov_money: "moov", wave: "wave" },
     SN: { orange_money: "orange", wave: "wave" },
     BJ: { mtn_money: "mtn", moov_money: "moov" },
-    ML: { orange_money: "orange", moov_money: "moov" },
+    ML: { orange_money: "orange", moov_money: "mobicash" },
     BF: { orange_money: "orange", moov_money: "moov" },
-    TG: { tmoney: "togocom", moov_money: "moov" },
+    TG: { tmoney: "togocell", moov_money: "moov" },
     CM: { mtn_money: "mtn" },
-    GH: { mtn_money: "mtn" },
 };
 const BASE = "https://api.hub2.io";
 

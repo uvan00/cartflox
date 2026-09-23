@@ -93,7 +93,9 @@ const suiteConnue = (intention: any) => {
     return !!(paiement?.nextAction || intention?.nextAction || paiement?.status === 'failed');
 };
 
-// Map method codes → Hub2 provider + country
+// Map method codes → Hub2 provider + country. Les noms sont ceux de Hub2
+// (GET https://api.hub2.io/data/providers?country=XX), pas ceux des marques :
+// T-Money y est « Togocell », Moov Mali « Mobicash ». Hub2 n'ouvre pas le Ghana.
 const METHOD_MAP: Record<string, { provider: string; country: string }> = {
     'orange-ci-hub2':   { provider: 'orange', country: 'CI' },
     'mtn-ci-hub2':      { provider: 'mtn',    country: 'CI' },
@@ -105,14 +107,13 @@ const METHOD_MAP: Record<string, { provider: string; country: string }> = {
     'mtn-bj-hub2':      { provider: 'mtn',    country: 'BJ' },
     'moov-bj-hub2':     { provider: 'moov',   country: 'BJ' },
     'orange-ml-hub2':   { provider: 'orange', country: 'ML' },
-    'moov-ml-hub2':     { provider: 'moov',   country: 'ML' },
+    'moov-ml-hub2':     { provider: 'mobicash', country: 'ML' },
     'orange-bf-hub2':   { provider: 'orange', country: 'BF' },
     'moov-bf-hub2':     { provider: 'moov',   country: 'BF' },
     'wave-bf-hub2':     { provider: 'wave',   country: 'BF' },
-    'tmoney-tg-hub2':   { provider: 'togocom', country: 'TG' },
+    'tmoney-tg-hub2':   { provider: 'togocell', country: 'TG' },
     'moov-tg-hub2':     { provider: 'moov',   country: 'TG' },
     'mtn-cm-hub2':      { provider: 'mtn',    country: 'CM' },
-    'mtn-gh-hub2':      { provider: 'mtn',    country: 'GH' },
 };
 
 export class Hub2Adapter implements IPaymentProvider {
@@ -407,7 +408,8 @@ export class Hub2Adapter implements IPaymentProvider {
         if (c.includes('moov'))   return 'moov';
         if (c.includes('wave'))   return 'wave';
         if (c.includes('free'))   return 'free';
-        if (c.includes('tmoney') || c.includes('togocom')) return 'togocom';
+        if (c.includes('tmoney') || c.includes('togoc')) return 'togocell';
+        if (c.includes('mobicash')) return 'mobicash';
         return 'mtn';
     }
 }
