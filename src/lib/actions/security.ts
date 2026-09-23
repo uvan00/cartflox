@@ -3,7 +3,7 @@
 import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
-import { logActivity } from "./team";
+import { logActivity } from "@/lib/audit";
 import crypto from "crypto";
 import { getSelectedAppId } from "./utils";
 import { encrypt, isEncrypted, isBcryptHash, safeDecrypt } from "@/lib/crypto";

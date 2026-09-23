@@ -214,10 +214,17 @@ export async function togglePaymentMethod(
             return { success: true, newId: record.id };
         }
 
-        await prisma.paymentMethod.update({
-            where: { id: methodId },
+        // Un moyen ne se bascule que dans son propre espace : par id seul, sans
+        // session, n'importe qui pouvait eteindre les moyens d'un autre marchand.
+        const session = await getSession();
+        if (!session?.user) return { success: false, error: "Non autorisé" };
+        const appId = await getSelectedAppId();
+        if (!appId) return { success: false, error: "Application non sélectionnée" };
+        const r = await prisma.paymentMethod.updateMany({
+            where: { id: methodId, applicationId: appId },
             data: { isActive }
         });
+        if (r.count === 0) return { success: false, error: "Moyen introuvable" };
         return { success: true };
     } catch (error) {
         console.error("Failed to toggle payment method:", error);

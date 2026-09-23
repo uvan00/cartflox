@@ -5,6 +5,8 @@ import { getSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
 import { getSelectedAppId } from "./utils";
 import { sendTeamInviteEmail } from "@/lib/email";
+import { logActivity } from "@/lib/audit";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function getTeamMembers() {
     try {
@@ -39,12 +41,26 @@ export async function inviteTeamMember(data: {
         const appId = await getSelectedAppId();
         if (!appId) throw new Error("No application selected");
 
+        // Champs explicites et bornes : ce qui vient du navigateur ne decide pas de
+        // ce qui entre en base. Une seule adresse par invitation.
+        const name = String(data.name || "").trim().slice(0, 80);
+        const email = String(data.email || "").trim().toLowerCase().slice(0, 160);
+        const role = String(data.role || "").trim().slice(0, 40) || "Membre";
+        const permission = String(data.permission || "").trim().slice(0, 40);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success: false, error: "Adresse e-mail invalide." };
+        // Chaque invitation part en e-mail signe de la plateforme : vingt par jour et par espace.
+        const quota = await rateLimit(`invitation:${appId}`, { limit: 20, windowSec: 86400 });
+        if (!quota.allowed) return { success: false, error: "Vingt invitations ont déjà été envoyées aujourd'hui. Réessayez demain." };
+
         const member = await prisma.teamMember.create({
             data: {
-                ...data,
+                name,
+                email,
+                role,
+                permission,
                 applicationId: appId,
                 status: "Hors ligne",
-                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name.split(' ')[0]}`,
+                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name.split(' ')[0] || email)}`,
                 lastActive: "Jamais"
             }
         });
@@ -58,12 +74,12 @@ export async function inviteTeamMember(data: {
 
         // Send invitation email (non-blocking)
         sendTeamInviteEmail({
-            to: data.email,
-            toName: data.name,
+            to: email,
+            toName: name,
             inviterName,
             appName,
-            role: data.role,
-            permission: data.permission,
+            role,
+            permission,
             inviteUrl,
         }).catch(err => console.error("[team] Failed to send invite email:", err));
 
@@ -71,7 +87,7 @@ export async function inviteTeamMember(data: {
         await logActivity({
             applicationId: appId,
             actorName: inviterName,
-            action: `A invité ${data.name} en tant que ${data.role}`,
+            action: `A invité ${name} en tant que ${role}`,
             location: "Dashboard"
         });
 
@@ -138,20 +154,3 @@ export async function getAuditLogs() {
     }
 }
 
-export async function logActivity(data: {
-    applicationId: string,
-    actorName: string,
-    action: string,
-    ipAddress?: string,
-    location?: string
-}) {
-    try {
-        await prisma.auditLog.create({
-            data
-        });
-        return { success: true };
-    } catch (error) {
-        console.error("Failed to log activity:", error);
-        return { success: false };
-    }
-}

@@ -371,7 +371,7 @@ export async function POST(req: NextRequest) {
         const assignedOverride = !!engineConfig.methodAssignments?.[assignmentKey];
         (async () => {
             try {
-                const { recordRoutingDecision } = await import('@/lib/actions/routing');
+                const { recordRoutingDecision } = await import('@/lib/routing-audit');
                 await recordRoutingDecision({
                     applicationId: transaction.applicationId || '',
                     transactionId: transaction.id,

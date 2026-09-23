@@ -4,7 +4,7 @@ import prisma from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
 import { getSelectedAppId } from "./utils";
-import { encryptGatewayWriteData, porteeDePasserelle, sansSecrets } from "@/lib/gateway-credentials";
+import { encryptGatewayWriteData, porteeDePasserelle, sansSecrets, SECRET_KEYS } from "@/lib/gateway-credentials";
 
 export async function getGateways() {
     try {
@@ -103,6 +103,34 @@ export async function getEnvironmentMode(): Promise<{ mode: 'live' | 'test' | nu
     }
 }
 
+/**
+ * Un champ secret vide ne touche pas au secret enregistre. Le tiroir recoit la
+ * configuration avec les secrets masques par "" (sansSecrets) et la renvoie
+ * entiere : ecrite telle quelle, elle effacait les cles de test quand on
+ * enregistrait les cles live (et l'inverse), et les cles des comptes par pays.
+ */
+function fusionnerConfig(existante: any, nouvelle: any): any {
+    if (!nouvelle || typeof nouvelle !== "object" || Array.isArray(nouvelle)) return nouvelle ?? existante;
+    const base = existante && typeof existante === "object" && !Array.isArray(existante) ? existante : {};
+    const out: any = { ...base };
+    for (const [k, v] of Object.entries(nouvelle)) {
+        if (v === "" && SECRET_KEYS.has(k)) continue;
+        if (v && typeof v === "object" && !Array.isArray(v)) out[k] = fusionnerConfig(base[k], v);
+        else out[k] = v;
+    }
+    return out;
+}
+
+/** Ce qu'un marchand peut ecrire sur sa passerelle, et rien d'autre. */
+function champsPasserelle(data: any): { name: string; countries?: string[]; apiKey?: string; apiSecret?: string; logo?: string; config?: any; status?: string } {
+    const out: Record<string, any> = { name: String(data?.name || "").trim().slice(0, 60) };
+    if (Array.isArray(data?.countries)) out.countries = data.countries.filter((c: unknown) => typeof c === "string").slice(0, 60);
+    for (const k of ["apiKey", "apiSecret", "logo"]) if (typeof data?.[k] === "string") out[k] = data[k].slice(0, 2000);
+    if (data?.config && typeof data.config === "object" && !Array.isArray(data.config)) out.config = data.config;
+    if (typeof data?.status === "string" && ["active", "inactive", "paused"].includes(data.status)) out.status = data.status;
+    return out as any;
+}
+
 export async function createGateway(data: {
     name: string;
     countries: string[];
@@ -131,11 +159,13 @@ export async function createGateway(data: {
             return { success: false, error: `Vous avez déjà une passerelle ${data.name} configurée.` };
         }
 
+        // Champs explicites : l'objet du navigateur etait etale tel quel, donc
+        // n'importe quelle colonne de la passerelle (isPlatform, uptime...) y passait.
         const gateway = await prisma.gateway.create({
             data: {
                 // SECURITY: encrypt provider secrets (apiKey/apiSecret + config) at rest,
                 // avec la clef derivee POUR CE MARCHAND (portee = son applicationId).
-                ...encryptGatewayWriteData(data, appId),
+                ...encryptGatewayWriteData(champsPasserelle(data), appId),
                 applicationId: appId,
                 uptime: "100%", // Default for new integration
                 successRate: "0%", // Starting fresh
@@ -185,7 +215,7 @@ export async function getGatewayById(id: string) {
                 }
             },
         });
-        return gateway;
+        return gateway ? sansSecrets(gateway) : null;
     } catch (error) {
         console.error("Error fetching gateway by id:", error);
         return null;
@@ -233,6 +263,18 @@ export async function validateGatewayCredentials(providerId: string, config: any
     }
 }
 
+/** Colonnes apiKey/apiSecret vides = non ressaisies ; config fusionnee sur l'existante. */
+function avecSecretsConserves(existing: any, champs: Record<string, any>) {
+    const out = { ...champs };
+    // Le tiroir n'envoie que les cles, sans le nom : un nom vide effacait celui de
+    // la passerelle, dont on deduit l'adaptateur a chaque paiement.
+    if (!out.name) delete out.name;
+    if (out.apiKey === "") delete out.apiKey;
+    if (out.apiSecret === "") delete out.apiSecret;
+    if (out.config) out.config = fusionnerConfig(existing?.config, out.config);
+    return out;
+}
+
 export async function updateGateway(id: string, data: any) {
     try {
         const session = await getSession();
@@ -254,7 +296,7 @@ export async function updateGateway(id: string, data: any) {
             // SECURITY: encrypt provider secrets (apiKey/apiSecret + config) at rest.
             // La portee vient de la ligne EXISTANTE, jamais du payload : une portee
             // differente de celle d'origine rendrait la passerelle indechiffrable.
-            data: encryptGatewayWriteData(data, porteeDePasserelle(existing)),
+            data: encryptGatewayWriteData(avecSecretsConserves(existing, champsPasserelle(data)), porteeDePasserelle(existing)),
         });
 
         revalidatePath("/gateways");

@@ -4,7 +4,7 @@ import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
 import { getSelectedAppId } from "./utils";
-import { logActivity } from "./team";
+import { logActivity } from "@/lib/audit";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { sendPasswordChangedEmail } from "@/lib/email";
@@ -49,9 +49,14 @@ export async function updateApplicationDetails(data: { name: string; website?: s
         const appId = await getSelectedAppId();
         if (!appId) throw new Error("No application selected");
 
+        // Champs explicites : l'objet du navigateur etait ecrit tel quel, donc
+        // liveMode, commissionBps ou les garde-fous des transferts y passaient.
         const application = await p.application.update({
             where: { id: appId },
-            data
+            data: {
+                name: String(data.name || "").trim().slice(0, 80),
+                ...(typeof data.website === "string" ? { website: data.website.trim().slice(0, 200) } : {}),
+            },
         });
 
         await logActivity({
@@ -108,9 +113,18 @@ export async function updateUserProfile(data: { name: string; email: string; pho
         // If no explicit image provided, generate dicebear from name
         const image = data.image || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.name || data.email || 'user')}`;
 
+        // Champs explicites. L'adresse de connexion ne se change pas ici : posee
+        // sans verification, elle permettait de prendre celle d'un futur inscrit
+        // (liaison de compte par le fournisseur OpenID Connect). Le pays reste
+        // libre (nom ou code) : le formulaire propose un nom en toutes lettres.
         const user = await prisma.user.update({
             where: { email: session.user.email },
-            data: { ...data, image }
+            data: {
+                name: String(data.name || "").trim().slice(0, 80),
+                phone: typeof data.phone === "string" ? data.phone.trim().slice(0, 32) : undefined,
+                country: typeof data.country === "string" ? data.country.trim().slice(0, 80) : undefined,
+                image: String(image).slice(0, 4000),
+            },
         });
 
         revalidatePath("/settings");

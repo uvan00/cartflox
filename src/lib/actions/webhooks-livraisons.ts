@@ -3,7 +3,7 @@
 import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getSelectedAppId } from "./utils";
-import { logActivity } from "./team";
+import { logActivity } from "@/lib/audit";
 import { AVEC_TESTS } from "@/lib/donnees-test";
 import { EVENEMENTS, livraisonVersApi, tenterLivraison } from "@/lib/webhook-dispatch";
 

@@ -293,7 +293,7 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
         if (result.status === 'SUCCESS' || result.status === 'FAILED' || result.status === 'CANCELLED') {
             (async () => {
                 try {
-                    const { updateDecisionOutcome } = await import('@/lib/actions/routing');
+                    const { updateDecisionOutcome } = await import('@/lib/routing-audit');
                     await updateDecisionOutcome(record.id, result.status as 'SUCCESS' | 'FAILED' | 'CANCELLED');
                 } catch { /* ignore */ }
             })();

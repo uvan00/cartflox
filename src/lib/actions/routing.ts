@@ -3,6 +3,7 @@
 import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getSelectedAppId } from "./utils";
+import { mapDbToData } from "@/lib/routing-audit";
 
 export type RoutingAlgorithmKind = 'SINGLE' | 'PRIORITY' | 'VOLUME_SPLIT' | 'ADVANCED' | 'DYNAMIC';
 
@@ -52,18 +53,6 @@ const DEFAULT_CONFIG: RoutingConfigData = {
     maxRetries: 3,
 };
 
-function mapDbToData(config: any): RoutingConfigData {
-    return {
-        algorithmKind: config.algorithmKind ?? 'PRIORITY',
-        methodAssignments: (config.methodAssignments as MethodAssignments) || {},
-        fallbackOrder: config.fallbackOrder || [],
-        volumeSplits: (config.volumeSplits as VolumeSplitEntry[]) || [],
-        routingRules: (config.routingRules as RoutingRule[]) || [],
-        successScores: (config.successScores as Record<string, number>) || {},
-        allowedProviders: config.allowedProviders || [],
-        maxRetries: config.maxRetries ?? 3,
-    };
-}
 
 /**
  * Get the routing config for the current application
@@ -87,20 +76,6 @@ export async function getRoutingConfig(): Promise<RoutingConfigData | null> {
     }
 }
 
-/**
- * Get the routing config by applicationId (public, for checkout)
- */
-export async function getRoutingConfigByAppId(applicationId: string): Promise<RoutingConfigData | null> {
-    try {
-        const config = await (prisma as any).routingConfig.findUnique({
-            where: { applicationId },
-        });
-        return config ? mapDbToData(config) : null;
-    } catch (error) {
-        console.error("[getRoutingConfigByAppId] error:", error);
-        return null;
-    }
-}
 
 /**
  * Save the full routing config for the current application
@@ -113,14 +88,21 @@ export async function saveRoutingConfig(data: RoutingConfigData): Promise<{ succ
         const appId = await getSelectedAppId();
         if (!appId) throw new Error("No application selected");
 
+        // Seules les passerelles DE CET ESPACE peuvent etre citees : les
+        // identifiants de passerelle sont publics (la page de paiement les envoie
+        // au navigateur), et l'initiation chargeait les passerelles de secours par
+        // id sans controle de propriete, donc avec les cles d'un autre marchand.
+        const siennes = new Set((await prisma.gateway.findMany({ where: { applicationId: appId }, select: { id: true } })).map((g) => g.id));
+        const sienne = (id: unknown) => typeof id === "string" && siennes.has(id);
+        const methodAssignments = Object.fromEntries(Object.entries(data.methodAssignments || {}).filter(([, id]) => sienne(id)));
         const payload = {
             algorithmKind: data.algorithmKind,
-            methodAssignments: data.methodAssignments,
-            fallbackOrder: data.fallbackOrder,
-            volumeSplits: data.volumeSplits,
-            routingRules: data.routingRules,
+            methodAssignments,
+            fallbackOrder: (data.fallbackOrder || []).filter(sienne),
+            volumeSplits: (data.volumeSplits || []).filter((v) => sienne(v?.gatewayId)),
+            routingRules: (data.routingRules || []).map((r) => ({ ...r, gatewayIds: (r.gatewayIds || []).filter(sienne) })),
             allowedProviders: data.allowedProviders,
-            maxRetries: data.maxRetries,
+            maxRetries: Math.min(5, Math.max(0, Math.round(Number(data.maxRetries) || 0))),
         };
 
         await (prisma as any).routingConfig.upsert({
@@ -348,51 +330,6 @@ export interface RoutingDecisionRecord {
     reason?: string | null;
 }
 
-/**
- * Persist a routing decision to the audit log. Called server-side from the
- * checkout initiate path. Failures are swallowed — logging must never block
- * a payment.
- */
-export async function recordRoutingDecision(record: RoutingDecisionRecord): Promise<void> {
-    try {
-        await (prisma as any).routingDecision.create({
-            data: {
-                applicationId: record.applicationId,
-                transactionId: record.transactionId ?? null,
-                algorithmKind: record.algorithmKind,
-                methodCode: record.methodCode,
-                country: record.country,
-                currency: record.currency,
-                amount: record.amount,
-                orderedGatewayIds: record.orderedGatewayIds,
-                chosenGatewayId: record.chosenGatewayId ?? null,
-                assignedOverride: record.assignedOverride ?? false,
-                reason: record.reason ?? null,
-                outcome: 'PENDING',
-            },
-        });
-    } catch (e) {
-        console.error('[recordRoutingDecision] error:', e);
-    }
-}
-
-/**
- * Update the outcome of a previously logged decision (called from webhook
- * handlers once the final transaction status is known).
- */
-export async function updateDecisionOutcome(
-    transactionId: string,
-    outcome: 'SUCCESS' | 'FAILED' | 'CANCELLED',
-): Promise<void> {
-    try {
-        await (prisma as any).routingDecision.updateMany({
-            where: { transactionId },
-            data: { outcome },
-        });
-    } catch (e) {
-        console.error('[updateDecisionOutcome] error:', e);
-    }
-}
 
 export interface DecisionListItem {
     id: string;

@@ -189,7 +189,7 @@ export async function applyVerificationResult(
     if (["SUCCESS", "FAILED", "CANCELLED"].includes(verification.status)) {
         (async () => {
             try {
-                const { updateDecisionOutcome } = await import("@/lib/actions/routing");
+                const { updateDecisionOutcome } = await import("@/lib/routing-audit");
                 await updateDecisionOutcome(tx.id, verification.status as "SUCCESS" | "FAILED" | "CANCELLED");
             } catch { /* ignore */ }
         })();

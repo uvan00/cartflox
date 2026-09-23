@@ -6,6 +6,8 @@ import { getSession } from "@/lib/session";
 import { revalidatePath } from "next/cache";
 import { getSelectedAppId } from "./utils";
 import { arrondirMontant, formaterMontant } from "@/lib/devises";
+import { rateLimit } from "@/lib/rate-limit";
+import { ipCourante } from "@/lib/ip-courante";
 
 /**
  * Hote qui SERT les pages /pay : `LIENS_PUBLIC_URL` s'il est pose (un domaine
@@ -294,6 +296,19 @@ export async function initializePaymentLinkTransaction(data: {
     amount?: number;
 }) {
     try {
+        // Sans session ni limite, cette action creait des transactions avec un
+        // numero et un nom libres, repris tels quels dans les messages envoyes
+        // ensuite au client (rappel WhatsApp, recu) : un tiers choisissait le
+        // texte adresse a la personne visee. Cinq ouvertures par lien et par
+        // connexion suffisent.
+        const quota = await rateLimit(`lien:${await ipCourante()}:${String(data.slug).slice(0, 80)}`, { limit: 5, windowSec: 600 });
+        if (!quota.allowed) throw new Error("Trop de tentatives, patientez quelques minutes.");
+        const customerName = String(data.customerName || "").replace(/https?:\/\/\S+/gi, "").replace(/[\/:<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+        const customerEmail = String(data.customerEmail || "").trim().toLowerCase().slice(0, 160);
+        const chiffres = String(data.customerPhone || "").replace(/\D/g, "");
+        if (customerName.length < 2) throw new Error("Indiquez votre nom");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error("Adresse e-mail invalide");
+        if (data.customerPhone && (chiffres.length < 8 || chiffres.length > 15)) throw new Error("Numéro de téléphone invalide");
         const link = (await prisma.paymentLink.findUnique({
             where: { slug: data.slug },
             include: { application: { select: { paymentMode: true, fraisClient: true } as any } },
@@ -333,9 +348,9 @@ export async function initializePaymentLinkTransaction(data: {
                 amount: total,
                 currency: devise,
                 status: 'PENDING',
-                customerName: data.customerName,
-                customerEmail: data.customerEmail,
-                customerPhone: data.customerPhone || null,
+                customerName,
+                customerEmail,
+                customerPhone: chiffres ? (String(data.customerPhone).trim().startsWith("+") ? `+${chiffres}` : chiffres) : null,
                 paymentType: 'MOBILE_MONEY',
                 provider: 'cartflox', // En attente du choix de l'opérateur sur la page de paiement
                 metadata: {

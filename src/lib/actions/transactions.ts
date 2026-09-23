@@ -25,6 +25,17 @@ const PUBLIC_TX_INCLUDE = {
     }
 } as const;
 
+/**
+ * Ce qui sort vers la page de paiement publique : des reglages de l'espace, seul
+ * le theme est utile. Le reste de `Application.metadata` (notifications, methodes
+ * de transfert, reglages internes) n'a rien a faire dans un lien de paiement.
+ */
+function epurer(t: any) {
+    if (!t?.application) return t;
+    const m = (t.application.metadata as any) || {};
+    return { ...t, application: { ...t.application, metadata: { checkoutTheme: m.checkoutTheme ?? null, checkoutThemeCustom: m.checkoutThemeCustom ?? null } } };
+}
+
 // Per-process throttle so the checkout's 4s polling doesn't hammer the
 // provider API: at most one provider verification per transaction per window.
 const lastProviderCheck = new Map<string, number>();
@@ -102,7 +113,7 @@ export async function getPublicTransaction(id: string) {
         } else {
             derniereAttente.delete(id);
         }
-        return transaction ?? null;
+        return transaction ? epurer(transaction) : null;
     } catch (error) {
         console.error("Error fetching public transaction:", error);
         return null;
@@ -231,9 +242,20 @@ export async function syncTransactionStatus(transactionId: string) {
     try {
         const session = await getSession();
         if (!session?.user) throw new Error("Unauthorized");
+        const appId = await getSelectedAppId();
+        if (!appId) throw new Error("Aucun espace sélectionné");
+        return await synchroniser(transactionId, appId);
+    } catch (error: any) {
+        console.error("Failed to sync transaction:", error);
+        return { error: error.message };
+    }
+}
 
-        const transaction = await prisma.transaction.findUnique({
-            where: { id: transactionId }
+/** Relecture chez le fournisseur, bornee a l'espace : jamais la transaction d'un autre marchand. */
+async function synchroniser(transactionId: string, appId: string) {
+    try {
+        const transaction = await prisma.transaction.findFirst({
+            where: { id: transactionId, applicationId: appId }
         });
 
         if (!transaction) {
@@ -330,7 +352,7 @@ export async function syncAllPendingTransactions() {
         let expiredCount = 0;
         for (const tx of pendingTransactions) {
             // Derniere chance de capter un vrai paiement aupres de la passerelle.
-            await syncTransactionStatus(tx.id);
+            await synchroniser(tx.id, appId);
             syncCount++;
 
             // Toujours PENDING ET trop vieille → la session a expire : on annule.
@@ -740,8 +762,10 @@ export async function getTransactionLogs(id: string) {
         const session = await getSession();
         if (!session?.user) throw new Error("Unauthorized");
 
+        const appId = await getSelectedAppId();
+        if (!appId) return [];
         const logs = await (prisma as any).providerLog.findMany({
-            where: { transactionId: id },
+            where: { transactionId: id, transaction: { applicationId: appId } },
             orderBy: { timestamp: 'desc' }
         });
 
