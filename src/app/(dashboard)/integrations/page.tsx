@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MARQUE } from "@/lib/marque";
 import Link from "next/link";
 import { Link2, Globe, Paintbrush, Download, Terminal, Check } from "lucide-react";
 import { getApiConfig } from "@/lib/actions/security";
@@ -25,7 +26,7 @@ const ONGLETS = [
 
 const CHOIX = [
     { cle: "lien" as Onglet, titre: "Un lien à partager", pour: "Pas de site, ou pas de développeur", texte: "Créez un lien à montant fixe, collez-le dans un bouton ou envoyez-le par WhatsApp.", logo: "/logos/whatsapp.svg" },
-    { cle: "widget" as Onglet, titre: "Le widget", pour: "Un site vitrine, une page produit", texte: "Deux lignes de code : un bouton ouvre la page de paiement Cartflox par-dessus votre site." },
+    { cle: "widget" as Onglet, titre: "Le widget", pour: "Un site vitrine, une page produit", texte: `Deux lignes de code : un bouton ouvre la page de paiement ${MARQUE} par-dessus votre site.` },
     { cle: "softpay" as Onglet, titre: "SoftPay", pour: "Un site avec sa propre charte", texte: "Le formulaire de paiement dans votre page, à vos couleurs ou dessiné par vous." },
     { cle: "woocommerce" as Onglet, titre: "WooCommerce", pour: "Une boutique WordPress", texte: "Le plugin officiel : installez, collez votre clé, vos clients paient en Mobile Money.", logo: "/logos/woocommerce.svg" },
     { cle: "api" as Onglet, titre: "L'API", pour: "Une application sur mesure", texte: "Créez des sessions de paiement depuis votre serveur, recevez les confirmations par webhook." },
@@ -79,7 +80,7 @@ export default function IntegrationsPage() {
             )}
 
             {onglet === "widget" && (
-                <Bloc titre="Widget : deux lignes sur votre site" sousTitre="Le bouton ouvre la page de paiement Cartflox par-dessus votre site (ou la redirige, au choix). Utilise votre clé publique uniquement.">
+                <Bloc titre="Widget : deux lignes sur votre site" sousTitre={`Le bouton ouvre la page de paiement ${MARQUE} par-dessus votre site (ou la redirige, au choix). Utilise votre clé publique uniquement.`}>
                     <Code>{`<script src="${APP_URL}/cartflox.js"></script>
 <script>
   Cartflox.configure({ publicKey: "${pub}", mode: "popup" });

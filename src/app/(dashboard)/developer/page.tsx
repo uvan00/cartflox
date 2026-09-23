@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MARQUE } from "@/lib/marque";
 import Link from "next/link";
 import { KeyRound, Webhook, Activity, BookOpen, Eye, EyeOff, RefreshCw, Puzzle, FlaskConical, Send, ListChecks } from "lucide-react";
 import { goeyToast } from "goey-toast";
@@ -140,7 +141,7 @@ export default function ApiLogsPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Bloc titre={<span className="flex items-center gap-2"><Webhook className="h-4 w-4" /> Webhook</span>} sousTitre="À chaque changement de statut, Cartflox envoie un message signé à cette adresse. C'est ce qui permet à votre site de valider une commande sans intervention.">
+                <Bloc titre={<span className="flex items-center gap-2"><Webhook className="h-4 w-4" /> Webhook</span>} sousTitre={`À chaque changement de statut, ${MARQUE} envoie un message signé à cette adresse. C'est ce qui permet à votre site de valider une commande sans intervention.`}>
                     <div className="space-y-4">
                         <Champ label="Adresse de production (https)">
                             <div className="flex flex-wrap items-center gap-2">
@@ -171,7 +172,7 @@ export default function ApiLogsPage() {
                             <Link href={`${SITE_PUBLIC}/docs/webhooks/signature/`} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: "var(--dt-text-muted)" }}>Comment vérifier la signature</Link>
                             <Link href={`${SITE_PUBLIC}/docs/webhooks/livraisons/`} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: "var(--dt-text-muted)" }}>Rejeu et journal</Link>
                         </div>
-                        <Aide>Signature : en-tête <code>X-Afriflow-Signature</code>, HMAC-SHA256 de <code>timestamp.corps</code> avec votre clé secrète (de test pour un événement de test). Votre serveur a 10 secondes pour répondre 2xx ; sinon Cartflox réessaie jusqu&apos;à 10 fois sur 72 heures, et vous pouvez renvoyer à la main ci-dessous. Avec WooCommerce, le plugin enregistre l&apos;adresse lui-même.</Aide>
+                        <Aide>Signature : en-tête <code>X-Afriflow-Signature</code>, HMAC-SHA256 de <code>timestamp.corps</code> avec votre clé secrète (de test pour un événement de test). Votre serveur a 10 secondes pour répondre 2xx ; sinon {MARQUE} réessaie jusqu&apos;à 10 fois sur 72 heures, et vous pouvez renvoyer à la main ci-dessous. Avec WooCommerce, le plugin enregistre l&apos;adresse lui-même.</Aide>
                     </div>
                 </Bloc>
 
@@ -238,7 +239,7 @@ export default function ApiLogsPage() {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <LienCarte href={`${SITE_PUBLIC}/docs/`} externe icone={BookOpen} titre="Documentation" texte="Référence complète de l'API, OpenAPI, SDK Node, PHP et Python, collection Postman." />
                 <LienCarte href="/integrations" icone={Puzzle} titre="Intégrations" texte="Widget, SoftPay, WooCommerce, lien de paiement : choisissez la vôtre." />
-                <LienCarte href={`${SITE_PUBLIC}/status`} externe icone={Activity} titre="État du service" texte="Disponibilité de Cartflox et de chaque passerelle." />
+                <LienCarte href={`${SITE_PUBLIC}/status`} externe icone={Activity} titre="État du service" texte={`Disponibilité de ${MARQUE} et de chaque passerelle.`} />
             </div>
         </Page>
     );

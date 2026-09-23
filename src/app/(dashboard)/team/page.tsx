@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { MARQUE } from "@/lib/marque";
 import { Modal } from "antd";
 import { Users2, UserPlus, Trash2, Mail, ScrollText } from "lucide-react";
 import { goeyToast } from "goey-toast";
@@ -106,7 +107,7 @@ export default function EquipePage() {
                     <Champ label="Rôle" aide={PERMISSIONS.find((p) => p.value === form.permission)?.aide}>
                         <Choix value={form.permission} onChange={(v) => setForm({ ...form, permission: v })} options={PERMISSIONS.map((p) => ({ value: p.value, label: p.label }))} className="w-full" />
                     </Champ>
-                    <Aide>La personne se connecte avec son propre compte Cartflox (créé à la première invitation). Vous pouvez retirer l&apos;accès à tout moment.</Aide>
+                    <Aide>La personne se connecte avec son propre compte {MARQUE} (créé à la première invitation). Vous pouvez retirer l&apos;accès à tout moment.</Aide>
                     <div className="flex justify-end gap-2"><Bouton variante="discret" onClick={() => setOuvert(false)}>Annuler</Bouton><Bouton icone={Mail} chargement={occupe === "invite"} onClick={inviter}>Envoyer l&apos;invitation</Bouton></div>
                 </div>
             </Modal>

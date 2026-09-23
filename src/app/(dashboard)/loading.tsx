@@ -1,3 +1,4 @@
+import { MARQUE } from "@/lib/marque";
 // Écran de chargement de marque pour le dashboard.
 // Le logo Cartflox est fait de deux blocs : le chevron foncé (ancre) et le bloc
 // clair qui vient « se positionner » pour compléter le logo — animation
@@ -5,7 +6,7 @@
 export default function DashboardLoading() {
     return (
         <div className="flex min-h-[70vh] w-full items-center justify-center">
-            <div className="cf-asm relative" aria-label="Chargement Cartflox" role="img">
+            <div className="cf-asm relative" aria-label={`Chargement ${MARQUE}`} role="img">
                 <span className="cf-asm-glow" aria-hidden="true" />
                 {/* Bloc gauche — chevron foncé (ancre) */}
                 <svg className="cf-asm-blk cf-asm-left" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MARQUE } from "@/lib/marque";
 import { Loader2, RotateCcw, Save, Check } from "lucide-react";
 import { goeyToast } from "goey-toast";
 import { CHECKOUT_THEMES } from "@/lib/checkout-themes";
@@ -120,7 +121,7 @@ export function PersonnalisationCheckout() {
                             </div>
                         </div>
                         <button type="button" onClick={() => setPerso(DEFAUT)} className="flex items-center gap-1.5 text-xs" style={{ color: "var(--dt-text-muted)" }}>
-                            <RotateCcw className="h-3 w-3" /> Revenir aux couleurs Cartflox
+                            <RotateCcw className="h-3 w-3" /> Revenir aux couleurs {MARQUE}
                         </button>
                     </div>
                 )}
@@ -155,7 +156,7 @@ export function PersonnalisationCheckout() {
                                 ))}
                             </div>
                             <div className="mx-4 mt-4 flex h-9 items-center justify-center rounded-full text-[12px] font-semibold" style={{ background: themeApercu.accent, color: themeApercu.accentText }}>Payer 5 000 XOF</div>
-                            <p className="mt-3 text-[8px]" style={{ color: themeApercu.textMuted }}>Sécurisé par Cartflox</p>
+                            <p className="mt-3 text-[8px]" style={{ color: themeApercu.textMuted }}>Sécurisé par {MARQUE}</p>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,5 @@
 import { envoyerEmail, EXPEDITEUR_EMAIL, EXPEDITEUR_NOM, REPONDRE_A, VOIE_ENVOI } from "@/lib/mailer";
+import { MARQUE } from "@/lib/marque";
 import { gabarit, montant, echapper, SITE, ACCENT, type Gabarit } from "@/lib/mail-gabarit";
 
 /**
@@ -8,7 +9,7 @@ import { gabarit, montant, echapper, SITE, ACCENT, type Gabarit } from "@/lib/ma
  */
 type Resultat = { ok: boolean; id?: string; erreur?: string };
 
-function envoyer(to: string | string[], subject: string, g: Gabarit, nom = "Cartflox", replyTo?: string): Promise<Resultat> {
+function envoyer(to: string | string[], subject: string, g: Gabarit, nom = MARQUE, replyTo?: string): Promise<Resultat> {
     const { html, text } = gabarit(g);
     return envoyerEmail({ from: `"${nom}" <${EXPEDITEUR_EMAIL}>`, to, subject, html, text, ...(replyTo ? { replyTo } : {}) });
 }
@@ -24,14 +25,14 @@ export async function sendEmail({ to, subject, html, text }: { to: string | stri
 // ── Compte ───────────────────────────────────────────────────────────────────
 
 export async function sendWelcomeEmail({ to, prenom, lienVerification }: { to: string; prenom?: string; lienVerification?: string }) {
-    return envoyer(to, "Bienvenue sur Cartflox", {
-        titre: "Bienvenue sur Cartflox",
+    return envoyer(to, `Bienvenue sur ${MARQUE}`, {
+        titre: `Bienvenue sur ${MARQUE}`,
         apercu: "Votre espace est prêt : branchez votre agrégateur et encaissez.",
         salutation: bonjour(prenom),
         paragraphes: [
-            "Votre compte est créé. Cartflox vous permet d'encaisser par Mobile Money et par carte partout en Afrique, avec vos propres comptes chez les agrégateurs : l'argent arrive directement chez vous, sans commission Cartflox.",
+            `Votre compte est créé. ${MARQUE} vous permet d'encaisser par Mobile Money et par carte partout en Afrique, avec vos propres comptes chez les agrégateurs : l'argent arrive directement chez vous, sans commission ${MARQUE}.`,
             "Pour encaisser votre premier paiement :",
-            "1. <strong>Branchez votre agrégateur</strong> (PayDunya, CinetPay, PawaPay, Stripe...) en collant ses clés API.<br>2. <strong>Créez un lien de paiement</strong>, ou intégrez Cartflox à votre site (widget, SoftPay, WooCommerce, API).<br>3. <strong>Vérifiez votre identité</strong> : une pièce d'identité, réponse sous 24 à 48 h.",
+            `1. <strong>Branchez votre agrégateur</strong> (PayDunya, CinetPay, PawaPay, Stripe...) en collant ses clés API.<br>2. <strong>Créez un lien de paiement</strong>, ou intégrez ${MARQUE} à votre site (widget, SoftPay, WooCommerce, API).<br>3. <strong>Vérifiez votre identité</strong> : une pièce d'identité, réponse sous 24 à 48 h.`,
             ...(lienVerification ? [`Pensez aussi à <a href="${echapper(lienVerification)}" style="color:${ACCENT};font-weight:600;">confirmer votre adresse e-mail</a> : c'est là que nous vous préviendrons de chaque paiement.`] : []),
         ],
         bouton: { label: "Ouvrir mon espace", url: `${SITE}/dashboard` },
@@ -40,39 +41,39 @@ export async function sendWelcomeEmail({ to, prenom, lienVerification }: { to: s
 }
 
 export async function sendPasswordResetEmail({ to, prenom, lien, validiteMin }: { to: string; prenom?: string; lien: string; validiteMin: number }) {
-    return envoyer(to, "Réinitialisation de votre mot de passe Cartflox", {
+    return envoyer(to, `Réinitialisation de votre mot de passe ${MARQUE}`, {
         titre: "Choisir un nouveau mot de passe",
         apercu: `Lien valable ${validiteMin} minutes.`,
         salutation: bonjour(prenom),
-        paragraphes: [`Vous avez demandé à réinitialiser le mot de passe de votre compte Cartflox. Le lien ci-dessous est valable <strong>${validiteMin} minutes</strong> et ne sert qu'une fois.`],
+        paragraphes: [`Vous avez demandé à réinitialiser le mot de passe de votre compte ${MARQUE}. Le lien ci-dessous est valable <strong>${validiteMin} minutes</strong> et ne sert qu'une fois.`],
         bouton: { label: "Choisir un nouveau mot de passe", url: lien },
         note: `Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br><span style="word-break:break-all;">${echapper(lien)}</span><br><br>Vous n'êtes pas à l'origine de cette demande ? Ignorez cet e-mail, votre mot de passe reste inchangé.`,
     });
 }
 
 export async function sendPasswordChangedEmail({ to, prenom, quand }: { to: string; prenom?: string; quand?: Date }) {
-    return envoyer(to, "Votre mot de passe Cartflox a été modifié", {
+    return envoyer(to, `Votre mot de passe ${MARQUE} a été modifié`, {
         titre: "Mot de passe modifié",
         apercu: "Si ce n'est pas vous, réagissez tout de suite.",
         salutation: bonjour(prenom),
         paragraphes: [
-            `Le mot de passe de votre compte Cartflox a été modifié le ${dateFr(quand)} (heure d'Abidjan).`,
+            `Le mot de passe de votre compte ${MARQUE} a été modifié le ${dateFr(quand)} (heure d'Abidjan).`,
             "Si c'est bien vous, tout est en ordre. Sinon, réinitialisez votre mot de passe immédiatement et activez la double authentification dans Sécurité.",
         ],
         bouton: { label: "Sécuriser mon compte", url: `${SITE}/security` },
-        pied: "Vous recevez cet e-mail parce qu'une action sensible a eu lieu sur votre compte Cartflox.",
+        pied: `Vous recevez cet e-mail parce qu'une action sensible a eu lieu sur votre compte ${MARQUE}.`,
     });
 }
 
 export async function sendTeamInviteEmail({ to, toName, inviterName, appName, role, permission, inviteUrl }: { to: string; toName: string; inviterName: string; appName: string; role: string; permission: string; inviteUrl: string }) {
-    return envoyer(to, `${inviterName} vous invite à rejoindre ${appName} sur Cartflox`, {
-        titre: `Rejoignez ${appName} sur Cartflox`,
+    return envoyer(to, `${inviterName} vous invite à rejoindre ${appName} sur ${MARQUE}`, {
+        titre: `Rejoignez ${appName} sur ${MARQUE}`,
         apercu: `${inviterName} vous a ajouté à l'équipe.`,
         salutation: bonjour(prenomDe(toName)),
-        paragraphes: [`<strong>${echapper(inviterName)}</strong> vous a ajouté à l'espace <strong>${echapper(appName)}</strong> sur Cartflox, la plateforme qui gère ses encaissements.`],
+        paragraphes: [`<strong>${echapper(inviterName)}</strong> vous a ajouté à l'espace <strong>${echapper(appName)}</strong> sur ${MARQUE}, la plateforme qui gère ses encaissements.`],
         lignes: [["Espace", appName], ["Votre poste", role], ["Vos droits", permission]],
         bouton: { label: "Accéder à l'espace", url: inviteUrl },
-        note: `Connectez-vous avec cette adresse (${echapper(to)}). Si vous n'avez pas encore de compte Cartflox, créez-le avec la même adresse. Si vous n'attendiez pas cette invitation, ignorez cet e-mail.`,
+        note: `Connectez-vous avec cette adresse (${echapper(to)}). Si vous n'avez pas encore de compte ${MARQUE}, créez-le avec la même adresse. Si vous n'attendiez pas cette invitation, ignorez cet e-mail.`,
     });
 }
 
@@ -104,8 +105,8 @@ export async function sendPaymentReceiptEmail({ to, customerName, merchantName, 
         paragraphes: [`Votre paiement à <strong>${echapper(merchantName)}</strong> a bien été enregistré. Conservez cet e-mail comme preuve de paiement.`],
         montant: { valeur: somme, legende: "paiement confirmé" },
         lignes: [["Marchand", merchantName], ["Moyen de paiement", method], ["Référence", orderId], ["Date", completedAt]],
-        note: "Pour toute question sur votre achat (livraison, contenu, remboursement), adressez-vous directement au marchand : Cartflox ne fait que transporter le paiement.",
-        pied: `Vous recevez cet e-mail parce que vous avez payé chez ${echapper(merchantName)}, dont les paiements sont gérés par Cartflox.`,
+        note: `Pour toute question sur votre achat (livraison, contenu, remboursement), adressez-vous directement au marchand : ${MARQUE} ne fait que transporter le paiement.`,
+        pied: `Vous recevez cet e-mail parce que vous avez payé chez ${echapper(merchantName)}, dont les paiements sont gérés par ${MARQUE}.`,
     });
 }
 
@@ -122,8 +123,8 @@ export async function sendFailureRateAlertEmail({ to, merchantName, failureRate,
         ],
         montant: { valeur: `${failureRate} %`, legende: "taux d'échec", ton: "alerte" },
         bouton: { label: "Voir les transactions", url: `${SITE}/transactions` },
-        pied: "Alerte automatique envoyée par Cartflox quand le taux d'échec dépasse le seuil.",
-    }, "Cartflox Alertes");
+        pied: `Alerte automatique envoyée par ${MARQUE} quand le taux d'échec dépasse le seuil.`,
+    }, `${MARQUE} Alertes`);
 }
 
 // ── Passerelles ──────────────────────────────────────────────────────────────
@@ -142,8 +143,8 @@ export async function sendCredentialsRefusedEmail({ to, prenom, merchantName, ga
             "Le plus souvent : une clé copiée avec un caractère en trop ou en moins, une clé de test utilisée en production (ou l'inverse), ou une clé régénérée chez l'agrégateur et jamais mise à jour ici. Ouvrez Passerelles, retapez la clé et utilisez « Vérifier » : la réponse est immédiate.",
         ],
         bouton: { label: "Vérifier ma passerelle", url: `${SITE}/gateways` },
-        pied: "Message automatique de Cartflox, envoyé au plus une fois par jour tant que le refus persiste.",
-    }, "Cartflox Alertes");
+        pied: `Message automatique de ${MARQUE}, envoyé au plus une fois par jour tant que le refus persiste.`,
+    }, `${MARQUE} Alertes`);
 }
 
 // ── Abonnement ───────────────────────────────────────────────────────────────
