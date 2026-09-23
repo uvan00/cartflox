@@ -80,7 +80,10 @@ export function motifEchec(rawData: unknown): MotifEchec | null {
         texte(d?.failureReason?.failureMessage) ||
         texte(d?.rejectionReason?.rejectionMessage) ||
         texte(d?.last_payment_error?.message) ||
-        texte(d?.response_text) ||
+        texte(d?.fail_reason) ||
+        // PayDunya : avec response_code « 00 », response_text (« Transaction Found »)
+        // dit seulement que la facture existe, pas pourquoi elle a échoué.
+        (d?.response_code === "00" ? "" : texte(d?.response_text)) ||
         texte(echecHub2(d)?.message) ||
         texte(d?.message)
     if (brut && brut.length <= 160 && !/^http/i.test(brut)) {

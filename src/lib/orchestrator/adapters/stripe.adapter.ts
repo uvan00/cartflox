@@ -215,8 +215,14 @@ export class StripeAdapter implements IPaymentProvider {
                 } else if (intent.status === 'canceled') {
                     status = 'CANCELLED';
                 } else if (intent.status === 'requires_payment_method') {
-                    // carte refusee ou abandonnee : le client peut retenter
-                    status = 'FAILED';
+                    // Une carte refusee (banque, 3-D Secure) laisse last_payment_error.
+                    // Sans lui, aucune carte n'a ete soumise : le client remplit encore le
+                    // formulaire, ou l'a quitte. Le compter en echec prevenait le marchand
+                    // (« Paiement echoue », webhook payment.failed) cinq minutes apres
+                    // l'ouverture du formulaire, et faisait passer Stripe pour defaillant
+                    // dans le routage mesure. Abandon au bout de 30 min, comme ailleurs.
+                    if (intent.last_payment_error) status = 'FAILED';
+                    else if (Date.now() / 1000 - intent.created > 30 * 60) status = 'CANCELLED';
                 }
                 // requires_action, requires_confirmation, processing : 3-D Secure ou
                 // traitement bancaire en cours, rien de definitif, on reste PENDING.

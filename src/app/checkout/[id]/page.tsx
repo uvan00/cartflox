@@ -491,9 +491,13 @@ export default function CheckoutPage() {
     const stripeRef = useRef<any>(null);
     const elementsRef = useRef<any>(null);
     const champRef = useRef<any>(null);
-    const [champCree, setChampCree] = useState(false);
+    const [champCree, setChampCree] = useState(0);   // compteur : chaque nouveau champ est remonte
     /** Stripe a dit « ready » : le formulaire accepte la saisie. */
     const [formulairePret, setFormulairePret] = useState(false);
+    /** Confirmation en cours chez Stripe : le bouton attend, l'ecran carte reste. */
+    const [confirmationEnCours, setConfirmationEnCours] = useState(false);
+    /** Double appui sur Payer : une seule demande part. */
+    const demandeEnCoursRef = useRef(false);
     /**
      * Stripe.js pese 1,5 s sur une 4G mediocre. Charge au CHOIX de la carte, il
      * est deja la quand l'acheteur clique sur Payer ; charge au clic, ce temps
@@ -829,7 +833,7 @@ export default function CheckoutPage() {
         stripeRef.current = null;
         elementsRef.current = null;
         champRef.current = null;
-        setChampCree(false);
+        setChampCree(0);
         setFormulairePret(false);
     }, [selectedMethod?.id]);
 
@@ -839,7 +843,7 @@ export default function CheckoutPage() {
      * de creer une intention de paiement a chaque fois que l'acheteur hesite
      * entre la carte et le Mobile Money.
      */
-    const secretCarteRef = useRef<{ clientSecret: string; publishableKey: string } | null>(null);
+    const secretCarteRef = useRef<{ clientSecret: string; publishableKey: string; pays: string } | null>(null);
 
     /**
      * Le secret est la : on prepare le formulaire SANS attendre le noeud. L'ecran
@@ -860,6 +864,7 @@ export default function CheckoutPage() {
                 // perdue a chercher ailleurs.
                 if (!stripe) {
                     setDernierEchec(tr("carte_bloquee"));
+                    journaliserEchecCarte(transaction?.id || "", { code: "stripe_bloque", type: "chargement", message: "js.stripe.com bloque ou inaccessible" }).catch(() => { });
                     return;
                 }
                 const elements = stripe.elements({
@@ -875,14 +880,16 @@ export default function CheckoutPage() {
                 // qu'un cadre gris qui ne se remplit jamais.
                 champ.on("loaderror", (e: any) => {
                     if (!annule) setDernierEchec(e?.error?.message || tr("carte_chargement_echec"));
+                    journaliserEchecCarte(transaction?.id || "", { code: "loaderror", type: "chargement", message: e?.error?.message || "" }).catch(() => { });
                 });
                 champ.on("ready", () => { if (!annule) setFormulairePret(true); });
                 stripeRef.current = stripe;
                 elementsRef.current = elements;
                 champRef.current = champ;
-                setChampCree(true);
+                setChampCree((n) => n + 1);
             } catch (e: any) {
                 if (!annule) setDernierEchec(e?.message || tr("carte_chargement_echec"));
+                journaliserEchecCarte(transaction?.id || "", { code: "creation", type: "chargement", message: e?.message || String(e) }).catch(() => { });
             }
         })();
         return () => { annule = true; };
@@ -895,6 +902,25 @@ export default function CheckoutPage() {
         champ.mount(montureCarte);
         return () => { try { champ.unmount(); } catch { /* deja retire */ } };
     }, [montureCarte, champCree]);
+
+    /**
+     * ⚠️ Quitter l'ecran carte (Retour, autre moyen, succes) demonte le champ :
+     * les instances et « pret » tombent avec lui. Sans cela, au retour, le bouton
+     * Payer etait actif TOUT DE SUITE sur un champ demonte et confirmPayment
+     * levait « IntegrationError: We could not retrieve data from the specified
+     * Element » : ecran d'attente sans fin, rien de journalise, Stripe jamais
+     * appele. Reproduit le 22/09/2026 ; 9 acheteurs sur 10 echouaient ainsi.
+     */
+    useEffect(() => {
+        if (paymentStatus === 'carte') return;
+        try { champRef.current?.unmount(); } catch { /* deja retire */ }
+        champRef.current = null;
+        elementsRef.current = null;
+        setChampCree(0);
+        setFormulairePret(false);
+        setConfirmationEnCours(false);
+        setCarteStripe(null);
+    }, [paymentStatus]);
 
     const needsPhone = isMobileMoneyMethod(selectedMethod) && !isRedirectOnlyProvider(selectedMethod);
     const paiementCarte = !!selectedMethod && /stripe/i.test(selectedMethod.gateway || "");
@@ -928,6 +954,19 @@ export default function CheckoutPage() {
             }
         }
         setDernierEchec(null);
+        // Double appui : la premiere demande part, la seconde attend son tour.
+        if (demandeEnCoursRef.current) return;
+        demandeEnCoursRef.current = true;
+        setTimeout(() => { demandeEnCoursRef.current = false; }, 1500);
+        // Carte deja demandee sur cette page, meme pays : on reprend la MEME
+        // intention chez Stripe. Le formulaire se refait a neuf et attend « pret ».
+        // Avant, chaque retour creait une intention de plus, jamais confirmee.
+        if (paiementCarte && secretCarteRef.current && secretCarteRef.current.pays === selectedCountry.code) {
+            demandeCarteRef.current++;
+            setCarteStripe({ ...secretCarteRef.current });
+            setPaymentStatus('carte');
+            return;
+        }
         // Carte : l'ecran carte s'ouvre TOUT DE SUITE, avec son attente, pendant
         // que le serveur cree l'intention de paiement. Un ecran intermediaire
         // n'ajouterait qu'un etat entre le clic et le formulaire.
@@ -962,7 +1001,7 @@ export default function CheckoutPage() {
             if (response.status === 'INLINE_CARD' && response.clientSecret && response.publishableKey) {
                 // L'acheteur est revenu en arriere pendant l'attente : on ne le ramene pas.
                 if (demande !== demandeCarteRef.current) return;
-                secretCarteRef.current = { clientSecret: response.clientSecret, publishableKey: response.publishableKey };
+                secretCarteRef.current = { clientSecret: response.clientSecret, publishableKey: response.publishableKey, pays: selectedCountry.code };
                 setCarteStripe(secretCarteRef.current);
                 setPaymentStatus('carte');
                 return;
@@ -1031,23 +1070,43 @@ export default function CheckoutPage() {
      * l'envoie ailleurs que si le moyen choisi l'impose vraiment.
      */
     const confirmerCarte = async () => {
-        if (!stripeRef.current || !elementsRef.current || !transaction) return;
+        if (!transaction || confirmationEnCours) return;
+        const stripe = stripeRef.current, elements = elementsRef.current;
+        if (!stripe || !elements || !formulairePret) { setDernierEchec(tr("carte_chargement_echec")); return; }
         setDernierEchec(null);
-        setPaymentStatus('initiating');
-        const { error } = await stripeRef.current.confirmPayment({
-            elements: elementsRef.current,
-            confirmParams: { return_url: `${window.location.origin}/checkout/success?id=${transaction.id}` },
-            redirect: 'if_required',
-        });
+        // On RESTE sur l'ecran carte pendant la confirmation : changer d'ecran
+        // demontait le champ sous les pieds de Stripe.
+        setConfirmationEnCours(true);
+        let error: any = null;
+        try {
+            ({ error } = await stripe.confirmPayment({
+                elements,
+                confirmParams: { return_url: `${window.location.origin}/checkout/success?id=${transaction.id}` },
+                redirect: 'if_required',
+            }));
+        } catch (e: any) {
+            // ⚠️ Stripe.js LEVE une exception (au lieu de renvoyer une erreur) quand le
+            // champ n'est plus monte ou pas encore pret. Sans ce filet, l'ecran
+            // d'attente ne finissait jamais et rien n'etait journalise.
+            error = { code: "exception", type: "integration_error", message: e?.message || String(e) };
+        }
+        setConfirmationEnCours(false);
         if (error) {
-            setPaymentStatus(null);
             // Le motif part au serveur : sans cette trace, l'echec n'existait nulle
             // part (l'intention restait « requires_payment_method » chez Stripe, sans
             // motif) et le marchand ne pouvait rien expliquer a son client.
-            journaliserEchecCarte(transaction.id, { code: (error as any).code, decline_code: (error as any).decline_code, type: (error as any).type, message: error.message }).catch(() => { });
+            journaliserEchecCarte(transaction.id, { code: error.code, decline_code: error.decline_code, type: error.type, message: error.message }).catch(() => { });
             const clair = messageCarte(error, langue) || error.message || tr("paiement_refuse");
             setDernierEchec(clair);
             goeyToast.error(clair);
+            // L'acheteur reste sur le formulaire, sa carte toujours saisie, pour
+            // corriger ou reessayer. Un champ en vrac (exception) est refait a neuf.
+            if (error.type === "integration_error" && secretCarteRef.current) {
+                try { champRef.current?.unmount(); } catch { /* deja retire */ }
+                champRef.current = null; elementsRef.current = null;
+                setChampCree(0); setFormulairePret(false);
+                setCarteStripe({ ...secretCarteRef.current });
+            }
             return;
         }
         // La banque a accepte : c'est le SERVEUR qui fait foi, on lui demande.
@@ -1622,7 +1681,7 @@ export default function CheckoutPage() {
                         {/* Sans cela, un formulaire bloque laissait un ecran MUET :
                             un titre, un bouton, et rien entre les deux. */}
                         {dernierEchec && (
-                            <Alerte theme={checkoutTheme} titre={tr("carte_erreur_titre")} texte={tr("carte_erreur_texte", { message: dernierEchec })}
+                            <Alerte theme={checkoutTheme} titre={tr(formulairePret ? "echec_titre" : "carte_erreur_titre")} texte={tr(formulairePret ? "echec_texte" : "carte_erreur_texte", { message: dernierEchec })}
                                 action={<button type="button" onClick={() => { setDernierEchec(null); setPaymentStatus(null); }} className="text-[12px] font-medium underline underline-offset-2" style={{ color: checkoutTheme.textSecondary }}>{tr("choisir_autre_moyen")}</button>} />
                         )}
                         {/* Attente visible tant que Stripe n'a pas dit « ready » : sans
@@ -1645,8 +1704,8 @@ export default function CheckoutPage() {
                         )}
                         <div className="flex gap-2">
                             <BoutonSecondaire theme={checkoutTheme} onClick={() => { demandeCarteRef.current++; setPaymentStatus(null); }}>{tr("retour")}</BoutonSecondaire>
-                            <BoutonPrincipal theme={checkoutTheme} onClick={confirmerCarte} disabled={!formulairePret} className="flex-1" style={{ height: 40, fontSize: 14 }}>
-                                <Lock size={13} /> {tr("payer_montant", { montant: formattedAmount, devise: displayCurrency })}
+                            <BoutonPrincipal theme={checkoutTheme} onClick={confirmerCarte} disabled={!formulairePret || confirmationEnCours} className="flex-1" style={{ height: 40, fontSize: 14 }}>
+                                {confirmationEnCours ? <Loader2 size={14} className="animate-spin" /> : <><Lock size={13} /> {tr("payer_montant", { montant: formattedAmount, devise: displayCurrency })}</>}
                             </BoutonPrincipal>
                         </div>
                     </motion.div>

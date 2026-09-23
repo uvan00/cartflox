@@ -92,8 +92,12 @@ export class DjamoAdapter implements IPaymentProvider {
     /** Message lisible pour un refus d'acces (401, 403, blocage du pare-feu). */
     private refus(status: number, data: any, bloque: boolean): string {
         if (bloque) {
-            return `le pare-feu de Djamo bloque l'adresse IP de votre serveur sur l'environnement ${this.environnement} `
-                + `(${this.base.replace(/\/v1$/, '')}). Vos clés ne sont pas en cause : demandez à Djamo d'autoriser l'adresse IP publique de votre serveur`;
+            // ADRESSES_IP_SORTIE : les adresses du serveur a donner a Djamo (IPv4 ET
+            // IPv6 : Node sort en IPv6 quand il le peut), ex. « 203.0.113.7 et 2001:db8::7 ».
+            const adresses = String(process.env.ADRESSES_IP_SORTIE || '').trim();
+            return `Le pare-feu de Djamo bloque l'adresse IP du serveur sur l'environnement ${this.environnement} `
+                + `(${this.base.replace(/\/v1$/, '')}) : vos clés ne sont pas en cause. Demandez à votre contact Djamo Business `
+                + `d'autoriser ${adresses || "l'adresse IP publique du serveur"}, puis vérifiez à nouveau.`;
         }
         const detail = this.message(data) || String(status);
         if (status === 401) {

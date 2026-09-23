@@ -143,6 +143,13 @@ export class PayDunyaAdapter implements IPaymentProvider {
             let phone = (details.phone || '').replace(/\D/g, '');
             const dial = dialCodes[country];
             if (dial && phone.startsWith(dial)) phone = phone.slice(dial.length);
+            // L'e-mail est facultatif au paiement, mais T-Money (Togo) refuse toute
+            // demande sans e-mail valide (« informations saisies incorrectes »). On
+            // passe alors l'adresse d'expedition de l'instance (MAIL_FROM).
+            const emailValide = (e?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e || '');
+            if (!emailValide(details.email) && emailValide(process.env.MAIL_FROM)) {
+                details = { ...details, email: process.env.MAIL_FROM };
+            }
 
             // PAYDUNYA SOFT PAY FIELD MAPPING (Inconsistent across countries/operators)
             if (m.includes('orange')) {

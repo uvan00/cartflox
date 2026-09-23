@@ -345,12 +345,19 @@ export async function POST(req: NextRequest) {
             if (cles.length > 1) {
                 const apriori: Record<string, number> = {};
                 cles.forEach((k, i) => { apriori[k] = 0.92 - i * 0.01; });
-                const { ordre, approche } = await ordonnerParMesure(contexteMesure, cles, apriori);
+                const mesure = await ordonnerParMesure(contexteMesure, cles, apriori);
+                const { approche } = mesure;
+                // Un moyen propre a Stripe (code en « -stripe » : carte, Google Pay,
+                // ACH) se paie dans le formulaire integre de Stripe, que l'acheteur a
+                // choisi : Stripe reste en tete, la mesure ne classe que les secours
+                // (une passerelle jamais mesuree passait sinon devant, sur son a priori).
+                const stripeEnTete = /-stripe$/i.test(methodCode) && cles.includes('stripe');
+                const ordre = stripeEnTete ? ['stripe', ...mesure.ordre.filter((k) => k !== 'stripe')] : mesure.ordre;
                 const rang = new Map(ordre.map((k, i) => [k, i]));
                 // Tri stable : a rang egal, l'ordre du marchand est conserve.
                 orderedGatewayIds = [...orderedGatewayIds].sort(
                     (x: string, y: string) => (rang.get(cleDe.get(x) || "") ?? 99) - (rang.get(cleDe.get(y) || "") ?? 99));
-                console.log(`📊 MESURE [${approche}] ${contexteMesure} -> ${ordre.join(' > ')}`);
+                console.log(`📊 MESURE [${approche}${stripeEnTete ? ', stripe en tete' : ''}] ${contexteMesure} -> ${ordre.join(' > ')}`);
             }
         } catch { /* la mesure ne doit jamais empecher un paiement */ }
 
@@ -530,6 +537,9 @@ export async function POST(req: NextRequest) {
         // ── PAYDUNYA: special SoftPay flow (USSD push, no redirect) ──
         // On failure, falls through to the general routing engine fallback loop below.
         let paydunyaAttempted = false;
+        // Ce que PayDunya a répondu en refusant : c'est le motif du moyen choisi par
+        // l'acheteur (sans lui, il lisait « Échec de l'initialisation du paiement »).
+        let motifPaydunya = '';
 
         if (providerKey === 'paydunya') {
             paydunyaAttempted = true;
@@ -572,6 +582,7 @@ export async function POST(req: NextRequest) {
                         // Log the failure and fall through to routing engine fallback
                         console.log(`⚠️ [PAYDUNYA] Invoice creation failed — will try fallback gateways`);
                         console.error(`❌ [PAYDUNYA] Invoice error detail:`, JSON.stringify(initResponse.rawData));
+                        motifPaydunya = extractProviderErrorMessage(initResponse.rawData);
                         await (prisma as any).providerLog.create({
                             data: {
                                 transactionId,
@@ -673,6 +684,7 @@ export async function POST(req: NextRequest) {
 
                     // SoftPay FAILED — log and fall through to routing engine fallback
                     console.log(`⚠️ [PAYDUNYA] SoftPay failed for ${methodCode} — will try fallback gateways`);
+                    motifPaydunya = extractProviderErrorMessage(softPayResponse.rawData);
                     await prisma.transaction.update({
                         where: { id: transactionId },
                         data: { providerRef: null }
@@ -712,7 +724,7 @@ export async function POST(req: NextRequest) {
         // lire, pas celui d'une passerelle de secours qu'il n'a jamais demandee (un
         // refus de carte se lisait « Minimum checkout amount is 200 FCFA », message
         // d'un fournisseur Mobile Money essaye ensuite).
-        let erreurPrincipale = '';
+        let erreurPrincipale = motifPaydunya;
         let currentSuccessScores: Record<string, number> = (engineConfig.successScores as Record<string, number>) ?? {};
         let attempts = 0;
 
