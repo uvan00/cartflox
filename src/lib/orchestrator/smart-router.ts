@@ -365,7 +365,7 @@ const ROUTING_RULES: ProviderRule[] = [
         provider: 'hub2',
         countries: ['CI', 'SN', 'BJ', 'TG', 'ML', 'BF'],
         currencies: ['XOF'],
-        methods: ['orange-money', 'mtn', 'moov', 'wave', 't-money', 'mobile-money'],
+        methods: ['orange-money', 'mtn', 'moov', 'wave', 'free-money', 't-money', 'mobile-money'],
         priority: 7,
         successRateEstimate: 0.89,
     },

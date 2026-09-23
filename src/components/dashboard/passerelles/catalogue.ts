@@ -328,7 +328,7 @@ export const ALL_PROVIDERS: Fournisseur[] = [
         description: "Mobile Money & Cards au Bénin et Afrique de l'Ouest",
         methods: [
             // Bénin
-            'MTN Bénin', 'Moov Bénin',
+            'MTN Bénin', 'Moov Bénin', 'Celtiis Money Bénin', 'Coris Money Bénin',
             // Togo
             'T-Money Togo', 'Flooz Togo', 'Moov Money Togo',
             // Côte d'Ivoire
@@ -487,8 +487,8 @@ export const ALL_PROVIDERS: Fournisseur[] = [
     {
         id: 'hub2_sn', name: 'Hub2 Sénégal', logo: '/icons/methods/hub2.svg', famille: HUB2,
         countries: ['SN'],
-        description: 'Orange Money et Wave au Sénégal',
-        methods: ['Orange Money Sénégal', 'Wave Sénégal'],
+        description: 'Orange Money, Wave et Free Money au Sénégal',
+        methods: ['Orange Money Sénégal', 'Wave Sénégal', 'Free Money Sénégal'],
         apiFields: CLES_HUB2,
         webhook: WEBHOOK_HUB2,
     },
@@ -511,8 +511,8 @@ export const ALL_PROVIDERS: Fournisseur[] = [
     {
         id: 'hub2_bf', name: 'Hub2 Burkina Faso', logo: '/icons/methods/hub2.svg', famille: HUB2,
         countries: ['BF'],
-        description: 'Orange Money et Moov Money au Burkina Faso',
-        methods: ['Orange Money Burkina', 'Moov Burkina'],
+        description: 'Orange Money, Moov Money et Wave au Burkina Faso',
+        methods: ['Orange Money Burkina', 'Moov Burkina', 'Wave Burkina'],
         apiFields: CLES_HUB2,
         webhook: WEBHOOK_HUB2,
     },
