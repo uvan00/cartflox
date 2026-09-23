@@ -46,20 +46,19 @@ export async function POST(req: NextRequest) {
         // une photo de 2 Mo rendait le tableau de bord interminable a charger sur
         // telephone. On redimensionne a 512 px et on encode en WebP, ce qui donne
         // quelques dizaines de kilo-octets pour un rendu identique a l'ecran.
-        // Le SVG est deja leger et vectoriel : on le garde tel quel.
-        if (file.type === "image/svg+xml") {
-            return NextResponse.json({ success: true, url: `data:${file.type};base64,${bytes.toString("base64")}` });
-        }
+        // Le SVG passe par le meme chemin et devient une image matricielle : un
+        // SVG peut porter un script, et le logo est servi par /api/logo sur
+        // l'origine du tableau de bord.
         try {
-            const reduit = await sharp(bytes, { animated: file.type === "image/gif" })
+            const reduit = await sharp(bytes, { animated: file.type === "image/gif", density: 192 })
                 .rotate()
                 .resize({ width: 512, height: 512, fit: "inside", withoutEnlargement: true })
                 .webp({ quality: 82 })
                 .toBuffer();
             return NextResponse.json({ success: true, url: `data:image/webp;base64,${reduit.toString("base64")}` });
         } catch {
-            // Image illisible par la bibliotheque : on conserve l'original.
-            return NextResponse.json({ success: true, url: `data:${file.type};base64,${bytes.toString("base64")}` });
+            // Illisible : on ne garde jamais des octets qu'on n'a pas su relire.
+            return NextResponse.json({ success: false, error: "Image illisible : envoyez un fichier PNG, JPG, WEBP, GIF ou SVG valide." }, { status: 400 });
         }
     } catch (error) {
         console.error("Upload error:", error);

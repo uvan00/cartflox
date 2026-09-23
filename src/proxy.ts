@@ -12,14 +12,17 @@ import { auth } from "@/lib/auth";
  */
 const PROTECTED_PATHS = [
     "/dashboard", "/settings", "/gateways", "/methods", "/transactions", "/customers",
-    "/analytics", "/integrations", "/campaigns", "/webhooks", "/team",
+    "/analytics", "/integrations", "/team",
     "/payment-links", "/billing", "/developer", "/security", "/statistics",
     "/transfers", "/applications",
 ];
 const CHECKOUT_HOST = (process.env.CHECKOUT_HOST || "").toLowerCase();
 
+// Host seulement : le mandataire le pose. x-forwarded-host etait lu en premier, or
+// un client peut l'envoyer lui-meme et se faire traiter comme un autre hote (celui
+// de la page de paiement, qui laissait passer le tableau de bord sans session).
 function hoteDe(req: NextRequest): string {
-    const h = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+    const h = req.headers.get("host") || "";
     return h.split(":")[0].toLowerCase();
 }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cronAutorise } from "@/lib/cron-auth";
 import { synchroniserEnCours } from "@/lib/transferts";
 
 /**
@@ -7,10 +8,7 @@ import { synchroniserEnCours } from "@/lib/transferts";
  * l'envoi lui-meme est reste sans reponse.
  */
 export async function GET(req: NextRequest) {
-    const secret = req.headers.get("x-cron-secret");
-    if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
-        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
+    if (!cronAutorise(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     const bilan = await synchroniserEnCours(50);
     return NextResponse.json({ ok: true, ...bilan });
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cronAutorise } from "@/lib/cron-auth";
 import prisma from "@/lib/db";
 import { AVEC_TESTS, CONSERVATION_TESTS_JOURS } from "@/lib/donnees-test";
 
@@ -11,10 +12,7 @@ import { AVEC_TESTS, CONSERVATION_TESTS_JOURS } from "@/lib/donnees-test";
  * Jamais une donnee de production.
  */
 export async function GET(req: NextRequest) {
-    const secret = req.headers.get("x-cron-secret");
-    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!cronAutorise(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const limite = new Date(Date.now() - CONSERVATION_TESTS_JOURS * 24 * 3600_000);
         const anciennes = await prisma.transaction.findMany({

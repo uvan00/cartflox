@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cronAutorise } from "@/lib/cron-auth";
 import prisma from "@/lib/db";
 import { getAdapterForTransaction, applyVerificationResult, annulerAbandon } from "@/lib/transaction-finalize";
 import { AVEC_TESTS } from "@/lib/donnees-test";
@@ -9,10 +10,7 @@ import logger from "@/lib/logger";
 // Syncs PENDING transactions with providers. Stalled ones (never initiated
 // with a provider) are CANCELLED; expired ones (initiated, >24h) are FAILED.
 export async function GET(req: NextRequest) {
-    const cronSecret = req.headers.get("x-cron-secret");
-    if (process.env.CRON_SECRET && cronSecret !== process.env.CRON_SECRET) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!cronAutorise(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const now = Date.now();
     const thirtyMinutesAgo = new Date(now - 30 * 60 * 1000);

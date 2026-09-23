@@ -68,12 +68,14 @@ export async function rateLimit(key: string, opts: RateLimitOptions): Promise<Ra
     return rateLimitInMemory(key, opts);
 }
 
-/** Extract best available client IP from Next.js request headers */
+/**
+ * IP du client. Le mandataire (nginx...) doit ecraser X-Real-IP avec l'adresse
+ * de la connexion : la valeur est alors sure. En repli, le DERNIER element de
+ * X-Forwarded-For est celui pose par le mandataire ; le premier peut etre ecrit
+ * par le client lui-meme.
+ */
 export function getClientIp(req: Request): string {
     const h = req.headers as any;
-    return (
-        h.get?.('x-real-ip') ||
-        h.get?.('x-forwarded-for')?.split(',')[0]?.trim() ||
-        'unknown'
-    );
+    const xff = String(h.get?.('x-forwarded-for') || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+    return h.get?.('x-real-ip') || xff[xff.length - 1] || 'unknown';
 }

@@ -1,5 +1,8 @@
 import nodemailer from "nodemailer";
 
+/** Adresse abregee pour les journaux : la premiere lettre et le domaine. */
+const masquer = (e: string) => e.replace(/^(.).*(@.*)$/, "$1***$2");
+
 /**
  * Envoi des e-mails du produit.
  *
@@ -146,7 +149,7 @@ export async function envoyerEmail(o: OptionsEmail): Promise<{ ok: boolean; id?:
             });
             const corps: any = await res.json().catch(() => ({}));
             if (res.ok) {
-                console.log(`[mail] envoye a ${destinataires.map((d) => d.email).join(", ")} : ${o.subject}`);
+                console.log(`[mail] envoye a ${destinataires.map((d) => masquer(d.email)).join(", ")} : ${o.subject}`);
                 return { ok: true, id: corps?.messageId };
             }
             const erreur = corps?.message || `HTTP ${res.status}`;
@@ -168,7 +171,7 @@ export async function envoyerEmail(o: OptionsEmail): Promise<{ ok: boolean; id?:
             html: o.html,
             ...(o.text ? { text: o.text } : {}),
         });
-        console.log(`[mail] envoye a ${destinataires.map((d) => d.email).join(", ")} : ${o.subject}`);
+        console.log(`[mail] envoye a ${destinataires.map((d) => masquer(d.email)).join(", ")} : ${o.subject}`);
         return { ok: true, id: info.messageId };
     } catch (e: any) {
         console.error("[mail] envoi SMTP impossible :", e?.message || e);

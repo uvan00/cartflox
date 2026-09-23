@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 
+// Servi tel quel : des images matricielles, qui ne peuvent rien executer. Un
+// ancien logo SVG est servi dans un bac a sable sans script (les nouveaux sont
+// rasterises a l'envoi) ; tout autre type declare (text/html...) est refuse.
+const TYPES_SURS = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/x-icon", "image/vnd.microsoft.icon"]);
+
 /**
  * Logo d'un espace, servi comme une image ordinaire.
  *
@@ -25,17 +30,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         });
     }
 
-    // Logo deja heberge ailleurs : on renvoie vers lui.
-    if (/^https?:\/\//i.test(brut)) return NextResponse.redirect(brut, 302);
-
+    // Seules les data URL sont servies : une adresse externe en ferait un
+    // redirecteur ouvert vers un site choisi par le marchand.
     const m = brut.match(/^data:([^;,]+);base64,(.+)$/);
     if (!m) return new NextResponse(null, { status: 404 });
+    const type = m[1].toLowerCase();
+    if (type !== "image/svg+xml" && !TYPES_SURS.has(type)) return new NextResponse(null, { status: 404 });
     const octets = Buffer.from(m[2], "base64");
-    return new NextResponse(new Uint8Array(octets), {
-        headers: {
-            "Content-Type": m[1],
-            "Content-Length": String(octets.length),
-            "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-        },
-    });
+    const entetes: Record<string, string> = {
+        "Content-Type": type,
+        "Content-Length": String(octets.length),
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+        "X-Content-Type-Options": "nosniff",
+    };
+    if (type === "image/svg+xml") entetes["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+    return new NextResponse(new Uint8Array(octets), { headers: entetes });
 }

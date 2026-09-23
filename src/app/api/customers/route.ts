@@ -4,13 +4,14 @@ import { getCustomers } from "@/lib/actions/customers";
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search") || "";
-    const page = parseInt(searchParams.get("page") || "1");
-    const pageSize = parseInt(searchParams.get("pageSize") || "50");
+    const page = Math.min(10_000, Math.max(1, parseInt(searchParams.get("page") || "1") || 1));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "50") || 50));
 
     try {
-        const data = await getCustomers({ page, pageSize, search });
+        const data = await getCustomers({ page, pageSize, search: search.slice(0, 120) });
         return NextResponse.json(data);
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("[customers]", error?.message);
+        return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
     }
 }

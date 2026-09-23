@@ -47,7 +47,7 @@ Puis, dans `.env` : `KEY_VAULTS_SECRET="file:/etc/cartflox/master.key"`. Perdre 
 
 ### Tâches planifiées
 
-Quatre appels HTTP à programmer (cron, systemd timer...), authentifiés par `CRON_SECRET` :
+Quatre appels HTTP à programmer (cron, systemd timer...), authentifiés par `CRON_SECRET` dans l'en-tête `x-cron-secret` (sans `CRON_SECRET`, ces routes refusent tout) :
 
 | Fréquence | Appel | Rôle |
 |---|---|---|
@@ -57,7 +57,7 @@ Quatre appels HTTP à programmer (cron, systemd timer...), authentifiés par `CR
 | une fois par jour | `GET /api/cron/purge-tests` | efface les données de test anciennes |
 
 ```
-*/10 * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://votre-domaine/api/cron/sync-pending
+*/10 * * * * curl -fsS -H "x-cron-secret: $CRON_SECRET" https://votre-domaine/api/cron/sync-pending
 ```
 
 ### Webhooks entrants des agrégateurs

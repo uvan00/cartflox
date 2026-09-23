@@ -174,20 +174,6 @@ export async function POST(req: NextRequest) {
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
         const checkoutUrl = lienCheckout(transaction.id);
 
-        // Fire-and-forget: trigger WhatsApp automation (new_customer)
-        if (!enTest) fetch(`${baseUrl}/api/automation-trigger`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...(process.env.INTERNAL_SECRET ? { "x-internal-secret": process.env.INTERNAL_SECRET } : {}),
-            },
-            body: JSON.stringify({
-                transactionId: transaction.id,
-                applicationId: config.applicationId,
-                trigger: "new_customer",
-            }),
-        }).catch(() => {});
-
         // --- Dynamic CORS: use application's allowedOrigins if configured ---
         const appMeta = (config.application?.metadata as any) || {};
         const allowedOrigins: string[] | null = appMeta.allowedOrigins || null;

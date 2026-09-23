@@ -7,6 +7,7 @@ const perimetreTransactions = async (applicationId: string) => ({ where: { appli
 import { annulerAbandon, getAdapterForTransaction, applyVerificationResult } from "@/lib/transaction-finalize";
 import { rembourserTransaction } from "@/lib/remboursement";
 import { getSelectedAppId } from "./utils";
+import { rateLimit } from "@/lib/rate-limit";
 
 const PUBLIC_TX_INCLUDE = {
     application: {
@@ -165,20 +166,26 @@ export async function getTransactionById(id: string) {
  */
 /**
  * Relance WhatsApp : envoie un rappel de paiement au client par un pont HTTP
- * (WHATSAPP_BRIDGE_URL, WHATSAPP_SESSION_ID). Trace l'envoi dans ProviderLog.
+ * (WHATSAPP_BRIDGE_URL, WHATSAPP_SESSION_ID). Seulement pour une transaction de
+ * l'espace courant, trois envois par jour et par transaction. Trace l'envoi
+ * dans ProviderLog.
  */
 export async function sendPaymentReminder(transactionId: string) {
     try {
         const session = await getSession();
         if (!session?.user) throw new Error("Unauthorized");
 
-        const tx = await prisma.transaction.findUnique({ where: { id: transactionId } });
+        const appId = await getSelectedAppId();
+        if (!appId) throw new Error("Aucun espace sélectionné");
+        const tx = await prisma.transaction.findFirst({ where: { id: transactionId, applicationId: appId } });
         if (!tx) throw new Error("Transaction introuvable");
         if (!tx.customerPhone) return { error: "Aucun numéro de téléphone pour ce client." };
 
         const BRIDGE_URL = (process.env.WHATSAPP_BRIDGE_URL || "").replace(/\/+$/, "");
         const SESSION_ID = process.env.WHATSAPP_SESSION_ID || "default";
         if (!BRIDGE_URL) return { error: "Aucun pont WhatsApp configuré (WHATSAPP_BRIDGE_URL)." };
+        const quota = await rateLimit(`rappel:${tx.id}`, { limit: 3, windowSec: 86400 });
+        if (!quota.allowed) return { error: "Trois rappels ont déjà été envoyés aujourd'hui pour ce paiement." };
 
         // Numeros stockes en international : gardes tels quels ; sinon on prefixe
         // l'indicatif par defaut de l'instance.

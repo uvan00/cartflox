@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cronAutorise } from "@/lib/cron-auth";
 import { rejouerLivraisonsDues } from "@/lib/webhook-dispatch";
 
 /**
@@ -7,10 +8,7 @@ import { rejouerLivraisonsDues } from "@/lib/webhook-dispatch";
  * (10 tentatives sur 72 h, cf. src/lib/webhook-dispatch.ts).
  */
 export async function GET(req: NextRequest) {
-    const secret = req.headers.get("x-cron-secret");
-    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!cronAutorise(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const resultat = await rejouerLivraisonsDues(50);
         if (resultat.dues) console.log(`[cron:webhooks-retry] ${resultat.livrees} livrée(s), ${resultat.echecs} échec(s) sur ${resultat.dues} due(s)`);

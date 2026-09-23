@@ -112,7 +112,10 @@ export const auth = betterAuth({
         cookiePrefix: "cartflox",
         useSecureCookies: PROD,
         ...(DOMAINE_COOKIE ? { crossSubDomainCookies: { enabled: PROD, domain: DOMAINE_COOKIE } } : {}),
-        ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"] },
+        // cf-connecting-ip n'est sur que derriere Cloudflare : ailleurs, c'est le
+        // client qui l'ecrit. Le mandataire pose X-Real-IP et X-Forwarded-For
+        // (limites de tentatives).
+        ipAddress: { ipAddressHeaders: ["x-real-ip", "x-forwarded-for"] },
     },
     plugins: [
         ...(OIDC_ACTIF

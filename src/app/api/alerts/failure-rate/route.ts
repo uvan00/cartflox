@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cronAutorise } from "@/lib/cron-auth";
 import prisma from "@/lib/db";
 import { sendFailureRateAlertEmail } from "@/lib/email";
 
@@ -10,10 +11,7 @@ const WINDOW_MINUTES = 60;
 // Checks each application's failure rate over the last WINDOW_MINUTES.
 // Sends an alert email to the merchant if failure rate > 10%.
 export async function GET(req: NextRequest) {
-    const cronSecret = req.headers.get("x-cron-secret");
-    if (process.env.CRON_SECRET && cronSecret !== process.env.CRON_SECRET) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!cronAutorise(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const since = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000);
 
