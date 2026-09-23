@@ -64,7 +64,7 @@ export default function SecuritePage() {
                         {journal.map((l) => (
                             <div key={l.id} className="flex flex-wrap justify-between gap-2 py-2.5 text-sm">
                                 <span style={{ color: "var(--dt-text-primary)" }}>{l.action}</span>
-                                <span className="text-xs" style={{ color: "var(--dt-text-muted)" }}>{l.actorName} · {fmtDate(l.createdAt)}{l.ipAddress ? ` · ${l.ipAddress}` : ""}</span>
+                                <span className="text-xs" style={{ color: "var(--dt-text-muted)" }}>{l.actorName}, {fmtDate(l.createdAt)}{l.ipAddress ? `, ${l.ipAddress}` : ""}</span>
                             </div>
                         ))}
                     </div>

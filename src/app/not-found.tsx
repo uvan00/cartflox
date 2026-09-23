@@ -16,6 +16,8 @@ export const metadata: Metadata = { title: `Page introuvable : ${MARQUE}`, robot
  * le HTML. Du texte regle les deux.
  */
 const bouton = { display: "inline-block", padding: "12px 20px", borderRadius: 12, fontWeight: 600, fontSize: 14, textDecoration: "none", color: "#fff" } as const;
+/** Numero WhatsApp du support de CETTE instance ; sans lui, pas de bouton. */
+const SUPPORT_WHATSAPP = (process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP || "").replace(/\D/g, "");
 
 export default function PageIntrouvable() {
     return (
@@ -32,7 +34,7 @@ export default function PageIntrouvable() {
                 <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12, marginTop: 32 }}>
                     <Link href="/" style={{ ...bouton, background: "#6D28D9" }}>Retour à l'accueil</Link>
                     <a href="/docs/" style={{ ...bouton, border: "1px solid #2a2a33", background: "#17171d" }}>Documentation</a>
-                    <a href="https://wa.me/22554038858" target="_blank" rel="noopener noreferrer" style={{ ...bouton, border: "1px solid #2a2a33", background: "#17171d" }}>Écrire au support</a>
+                    {SUPPORT_WHATSAPP && <a href={`https://wa.me/${SUPPORT_WHATSAPP}`} target="_blank" rel="noopener noreferrer" style={{ ...bouton, border: "1px solid #2a2a33", background: "#17171d" }}>Écrire au support</a>}
                 </div>
                 <p style={{ color: "#71717a", fontSize: 12, marginTop: 44 }}>Erreur 404, page introuvable.</p>
             </div>

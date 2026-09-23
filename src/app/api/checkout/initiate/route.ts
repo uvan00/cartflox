@@ -400,7 +400,7 @@ export async function POST(req: NextRequest) {
                     assignedOverride,
                     reason: assignedOverride
                         ? `Override méthode → ${orderedGatewayIds[0]}`
-                        : `${engineConfig.algorithmKind} · ${orderedGatewayIds.length} gateway(s) · ${maxAttempts} attempt(s)`,
+                        : `${engineConfig.algorithmKind}, ${orderedGatewayIds.length} gateway(s), ${maxAttempts} attempt(s)`,
                 });
             } catch { /* swallow — logging must never break checkout */ }
         })();

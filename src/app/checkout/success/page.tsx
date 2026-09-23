@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, Suspense } from "react";
+import { MARQUE } from "@/lib/marque";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Check, X, Loader2, Clock, ArrowRight, RotateCcw } from "lucide-react";
@@ -20,7 +21,8 @@ type Phase = 'loading' | 'success' | 'failed' | 'cancelled' | 'pending' | 'refun
 function SuccessContent() {
     const searchParams = useSearchParams();
     const transactionId = searchParams.get('id');
-    const wasCancelled = searchParams.get('status') === 'cancelled';
+    // Stripe ajoute `redirect_status=failed` quand l'authentification par redirection echoue.
+    const wasCancelled = searchParams.get('status') === 'cancelled' || searchParams.get('redirect_status') === 'failed';
     // Page hebergee (FeexLink v2) : le fournisseur ajoute sa reference en `?ref=` au retour.
     const refRetour = searchParams.get('ref') || searchParams.get('reference');
     // Langue de la page (adresse, choix memorise, navigateur) et raccourci de traduction.
@@ -30,6 +32,8 @@ function SuccessContent() {
     const [phase, setPhase] = useState<Phase>('loading');
     const [tx, setTx] = useState<any>(null);
     const [theme, setTheme] = useState<CheckoutTheme>(DEFAULT_THEME);
+    // Le sondage s'est arrete sans issue : on propose de reprendre le paiement.
+    const [sondageFini, setSondageFini] = useState(false);
 
     useEffect(() => {
         if (!transactionId) { setPhase('notfound'); return; }
@@ -59,8 +63,9 @@ function SuccessContent() {
                             window.parent.postMessage({ type: 'afriflow:success', payload: { transactionId, orderId: transaction.orderId, amount: transaction.amount, currency: transaction.currency } }, '*');
                         }
                     } catch {}
-                    const successUrl = (transaction.metadata as any)?.success_url;
-                    if (successUrl) setTimeout(() => { window.location.href = successUrl; }, 2500);
+                    // Seulement http(s) : une adresse javascript: s'executerait sur notre domaine.
+                    const successUrl = String((transaction.metadata as any)?.success_url || "");
+                    if (/^https?:\/\//i.test(successUrl)) setTimeout(() => { window.location.href = successUrl; }, 2500);
                     return;
                 }
                 if (transaction.status === 'FAILED') { setPhase('failed'); return; }
@@ -75,6 +80,8 @@ function SuccessContent() {
 
             if (Date.now() - startedAt < POLL_MAX_MS) {
                 timer = setTimeout(tick, POLL_EVERY_MS);
+            } else {
+                setSondageFini(true);
             }
         };
 
@@ -110,7 +117,7 @@ function SuccessContent() {
                     etiquette={phase === 'success' ? tr("montant_paye") : tr("montant")}
                     lignes={[...(tx.customerEmail ? [{ label: tr("recu_envoye_a"), valeur: String(tx.customerEmail) }] : []), ...(tx.providerRef || tx.orderId ? [{ label: tr("reference"), valeur: String(tx.providerRef || tx.orderId) }] : [])]} />
             ) : (
-                <div className="hidden lg:block"><p className="text-[13px]" style={{ color: theme.textMuted }}>Cartflox</p><p className="mt-2 text-[28px] leading-tight" style={{ color: theme.textPrimary }}>{tr("suivi_paiement")}</p></div>
+                <div className="hidden lg:block"><p className="text-[13px]" style={{ color: theme.textMuted }}>{MARQUE}</p><p className="mt-2 text-[28px] leading-tight" style={{ color: theme.textPrimary }}>{tr("suivi_paiement")}</p></div>
             )
         }>
             <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
@@ -123,7 +130,7 @@ function SuccessContent() {
                     <p className="mx-auto mt-1 max-w-[300px] text-[13px] leading-relaxed" style={{ color: theme.textMuted }}>{v.detail}</p>
                     {amount && phase !== 'notfound' && <p className="mt-3 text-[14px] font-medium" style={{ color: theme.textSecondary }}>{tr("montant_a", { montant: amount, devise: currency, nom: marchand.nom })}</p>}
                 </div>
-                {(phase === 'failed' || phase === 'cancelled') && retryHref && (
+                {(phase === 'failed' || phase === 'cancelled' || (phase === 'pending' && sondageFini)) && retryHref && (
                     <a href={retryHref} className="inline-flex h-11 items-center gap-2 rounded-xl px-5 text-[14px] font-semibold" style={{ background: theme.accent, color: theme.accentText, textDecoration: 'none' }}>
                         {tr("reessayer_paiement")} <ArrowRight size={15} />
                     </a>

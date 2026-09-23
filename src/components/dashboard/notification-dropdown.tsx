@@ -246,23 +246,6 @@ export function NotificationDropdown() {
                         )}
                     </div>
 
-                    {/* Footer */}
-                    {notifications.length > 0 && (
-                        <div
-                            className="px-4 py-2.5 text-center"
-                            style={{ borderTop: `1px solid ${theme.divider}` }}
-                        >
-                            <button
-                                onClick={() => { setOpen(false); router.push("/notifications"); }}
-                                className="text-[11px] transition-colors"
-                                style={{ color: "#5B8DEF" }}
-                                onMouseEnter={e => (e.currentTarget.style.opacity = "0.8")}
-                                onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
-                            >
-                                Voir toutes les notifications →
-                            </button>
-                        </div>
-                    )}
                 </div>
             )}
         </div>

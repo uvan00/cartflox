@@ -18,7 +18,7 @@ export async function rembourserTransaction(transactionId: string, appId: string
     if (!tx) return { error: "Transaction introuvable" };
     if ((tx.status as string) === 'REFUNDED') return { error: "Cette transaction a déjà été remboursée" };
     if (tx.status !== 'SUCCESS') return { error: "Seules les transactions réussies peuvent être remboursées" };
-    if (!tx.providerRef) return { error: "Référence provider manquante — remboursement impossible" };
+    if (!tx.providerRef) return { error: "Référence provider manquante : remboursement impossible" };
 
     const adapter = await getAdapterForTransaction(tx);
     if (!adapter) return { error: `Passerelle introuvable pour ${tx.provider}` };

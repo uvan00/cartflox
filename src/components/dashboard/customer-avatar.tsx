@@ -1,21 +1,20 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 
 /**
- * Avatar client : la PHOTO Gravatar de l'email si elle existe, sinon un avatar
- * DESSINE (Gravatar `d=retro` pour un email, DiceBear sinon). Hash SHA-256 natif
- * (crypto.subtle, supporte par Gravatar) -> aucune dependance.
+ * Pastille d'un client : ses initiales, dessinees ici. La version precedente
+ * envoyait le nom du client a DiceBear et l'empreinte de son e-mail a Gravatar,
+ * une requete externe par ligne de tableau : donnees des clients chez deux tiers
+ * et des dizaines d'appels par page.
  */
-async function sha256Hex(input: string): Promise<string> {
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-    return Array.from(new Uint8Array(buf))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-}
+const TEINTES = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316"];
 
-const diceBear = (seed: string) =>
-    `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(seed.toLowerCase() || "client")}`;
+function initiales(nom?: string | null, email?: string | null): string {
+    const base = (nom || "").trim() || (email || "").split("@")[0] || "?";
+    const mots = base.split(/[\s._-]+/).filter(Boolean);
+    return (mots.length >= 2 ? mots[0][0] + mots[1][0] : base.slice(0, 2)).toUpperCase();
+}
 
 export default function CustomerAvatar({
     email,
@@ -30,44 +29,16 @@ export default function CustomerAvatar({
     square?: boolean;
     style?: CSSProperties;
 }) {
-    const fallback = diceBear(name || email || "client");
-    const [src, setSrc] = useState<string>(fallback);
-
-    useEffect(() => {
-        let alive = true;
-        const e = (email || "").trim().toLowerCase();
-        if (!e) {
-            setSrc(diceBear(name || "client"));
-            return;
-        }
-        // Gravatar : photo de l'email si elle existe, sinon un avatar dessine (retro).
-        sha256Hex(e)
-            .then((h) => {
-                if (alive) setSrc(`https://www.gravatar.com/avatar/${h}?s=${size * 2}&d=retro`);
-            })
-            .catch(() => {});
-        return () => {
-            alive = false;
-        };
-    }, [email, name, size]);
-
+    const cle = (email || name || "?").toLowerCase();
+    let h = 0;
+    for (const ch of cle) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const fond = TEINTES[h % TEINTES.length];
     return (
-        <img
-            src={src}
-            alt={name || ""}
-            width={size}
-            height={size}
-            referrerPolicy="no-referrer"
-            onError={() => setSrc(diceBear(name || email || "client"))}
-            style={{
-                width: size,
-                height: size,
-                borderRadius: square ? 8 : "50%",
-                objectFit: "cover",
-                flexShrink: 0,
-                background: "rgba(127,127,127,0.12)",
-                ...style,
-            }}
-        />
+        <span aria-hidden="true" style={{
+            width: size, height: size, borderRadius: square ? Math.round(size / 4) : "50%", background: fond, color: "#ffffff",
+            display: "inline-grid", placeItems: "center", fontSize: Math.max(10, Math.round(size * 0.38)), fontWeight: 600, letterSpacing: 0.3, flexShrink: 0, ...style,
+        }}>
+            {initiales(name, email)}
+        </span>
     );
 }

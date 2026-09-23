@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { MARQUE } from "@/lib/marque";
 import { chiffreMontant, formaterMontant } from "@/lib/devises";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -314,8 +315,8 @@ export default function TransactionDetailsPage() {
     const hasFees = transaction.platformFee != null && transaction.merchantAmount != null;
     const country = phoneCountry(transaction.customerPhone);
     const methodLabel = (metadata.methodCode || transaction.paymentType || '')
-        .replace(/[-_]/g, ' ').trim() || '—';
-    const description = metadata.description || (transaction.orderId ? `Commande ${transaction.orderId}` : '—');
+        .replace(/[-_]/g, ' ').trim() || '';
+    const description = metadata.description || (transaction.orderId ? `Commande ${transaction.orderId}` : '');
 
     return (
         <>
@@ -390,7 +391,7 @@ export default function TransactionDetailsPage() {
                             </div>
                             <div className="flex items-center gap-1.5 text-xs flex-wrap" style={{ color: 'var(--dt-text-muted)' }}>
                                 <Hash size={12} />
-                                <span>Order</span>
+                                <span>Commande</span>
                                 <CopyChip text={transaction.orderId} label="orderId" />
                             </div>
                         </div>
@@ -404,7 +405,7 @@ export default function TransactionDetailsPage() {
                             </div>
                             {hasFees && (
                                 <p className="text-[10px] mt-1" style={{ color: 'var(--dt-text-muted)' }}>
-                                    Net marchand : {chiffreMontant(transaction.merchantAmount, transaction.currency)} · Frais : {chiffreMontant(transaction.platformFee, transaction.currency)} {transaction.currency}
+                                    Net marchand : {chiffreMontant(transaction.merchantAmount, transaction.currency)}, Frais : {chiffreMontant(transaction.platformFee, transaction.currency)} {transaction.currency}
                                 </p>
                             )}
                         </div>
@@ -414,14 +415,14 @@ export default function TransactionDetailsPage() {
                             <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: 'var(--dt-text-muted)' }}>Méthode</p>
                             <div className="flex items-center gap-1.5 text-xs font-medium">
                                 {isMobile ? <Smartphone size={12} className="text-blue-400" /> : <CreditCard size={12} className="text-purple-400" />}
-                                <span className="truncate">{transaction.paymentType || '—'}</span>
+                                <span className="truncate">{transaction.paymentType || ''}</span>
                             </div>
                         </div>
                         <div className="p-4">
                             <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: 'var(--dt-text-muted)' }}>Passerelle</p>
                             <div className="flex items-center gap-1.5 text-xs font-medium">
                                 <Globe size={12} className="text-teal-400" />
-                                <span className="truncate">{transaction.provider || '—'}</span>
+                                <span className="truncate">{transaction.provider || ''}</span>
                             </div>
                         </div>
                         <div className="p-4">
@@ -455,8 +456,8 @@ export default function TransactionDetailsPage() {
                                 <div className="flex items-center gap-3">
                                     <CustomerAvatar email={transaction.customerEmail} name={transaction.customerName} size={44} />
                                     <div className="min-w-0">
-                                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--dt-text-primary)' }}>{transaction.customerName || '—'}</p>
-                                        <p className="text-[12px] truncate" style={{ color: 'var(--dt-text-muted)' }}>{transaction.customerEmail || '—'}</p>
+                                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--dt-text-primary)' }}>{transaction.customerName || ''}</p>
+                                        <p className="text-[12px] truncate" style={{ color: 'var(--dt-text-muted)' }}>{transaction.customerEmail || ''}</p>
                                     </div>
                                 </div>
                                 <div className="space-y-3 pt-1">
@@ -483,7 +484,7 @@ export default function TransactionDetailsPage() {
                                 <h3 className="text-sm font-medium">Passerelle</h3>
                             </div>
                             <div className="p-5 space-y-3">
-                                <InfoRow label="Passerelle"><span className="font-semibold">{transaction.provider || '—'}</span></InfoRow>
+                                <InfoRow label="Passerelle"><span className="font-semibold">{transaction.provider || ''}</span></InfoRow>
                                 <InfoRow label="Méthode"><span className="capitalize">{methodLabel}</span></InfoRow>
                                 {transaction.providerRef && (
                                     <InfoRow label="Id de la transaction"><CopyChip text={transaction.providerRef} label="providerRef" /></InfoRow>
@@ -500,7 +501,7 @@ export default function TransactionDetailsPage() {
                                         <GitBranch size={14} className="text-indigo-400" />
                                         <h3 className="text-sm font-medium">Décision de routage</h3>
                                         {decision.assignedOverride && (
-                                            <span className="text-[9px] px-1.5 py-0.5 rounded font-medium text-amber-400 bg-amber-500/10">override</span>
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded font-medium text-amber-400 bg-amber-500/10">affectation</span>
                                         )}
                                     </div>
                                     <Link href="/methods?tab=decisions" className="text-[11px] text-primary hover:underline">Tout voir →</Link>
@@ -722,7 +723,7 @@ export default function TransactionDetailsPage() {
                             <dl className="space-y-2.5 text-[13px]">
                                 {[
                                     ["Payé par", transaction.customerName || "Client"],
-                                    ["Contact", [transaction.customerEmail, transaction.customerPhone].filter(Boolean).join(" · ")],
+                                    ["Contact", [transaction.customerEmail, transaction.customerPhone].filter(Boolean).join(", ")],
                                     ["Objet", (transaction.metadata as any)?.description || null],
                                     ["Moyen de paiement", transaction.paymentType === "CARD" ? "Carte bancaire" : transaction.paymentType === "MOBILE_MONEY" ? "Mobile Money" : transaction.paymentType || null],
                                     ["Traité par", transaction.provider || null],
@@ -739,13 +740,13 @@ export default function TransactionDetailsPage() {
                             {/* Ce que le marchand touche reellement, quand une commission s'applique */}
                             {Number(transaction.platformFee) > 0 && (
                                 <div className="space-y-2 rounded-xl border border-slate-200 p-4 text-[13px]">
-                                    <div className="flex justify-between"><span className="text-slate-500">Commission Cartflox</span><span className="font-medium text-slate-900">{chiffreMontant(transaction.platformFee, transaction.currency)} {transaction.currency}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-500">Commission {MARQUE}</span><span className="font-medium text-slate-900">{chiffreMontant(transaction.platformFee, transaction.currency)} {transaction.currency}</span></div>
                                     <div className="flex justify-between"><span className="text-slate-500">Net pour {transaction.marchand?.nom || "le commerce"}</span><span className="font-semibold text-slate-900">{chiffreMontant(Number(transaction.merchantAmount || transaction.amount - transaction.platformFee), transaction.currency)} {transaction.currency}</span></div>
                                 </div>
                             )}
 
                             <p className="border-t border-slate-200 pt-4 text-center text-[11.5px] leading-relaxed text-slate-400">
-                                Reçu émis par Cartflox{transaction.marchand?.nom ? ` pour ${transaction.marchand.nom}` : ""}.<br />
+                                Reçu émis par {MARQUE}{transaction.marchand?.nom ? ` pour ${transaction.marchand.nom}` : ""}.<br />
                                 Identifiant de la transaction : <span className="font-mono">{transaction.id}</span>
                             </p>
                         </div>

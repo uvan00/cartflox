@@ -84,9 +84,9 @@ export async function rechercheGlobale(q: string) {
         }),
     ]);
     return [
-        ...tx.map((t) => ({ id: `t-${t.id}`, type: "transaction", groupe: "Transactions", titre: `${t.orderId} · ${formaterMontant(t.amount, t.currency)}`, sous: `${t.customerName || "client inconnu"} · ${STATUT_FR[t.status] || t.status} · ${new Date(t.createdAt).toLocaleDateString("fr-FR")}`, href: `/transactions/${t.id}` })),
-        ...clients.map((c) => ({ id: `c-${c.id}`, type: "client", groupe: "Clients", titre: c.name || c.email, sous: [c.email, c.phone].filter(Boolean).join(" · "), href: `/customers?q=${encodeURIComponent(c.email || c.name || "")}` })),
-        ...liens.map((l) => ({ id: `l-${l.id}`, type: "lien", groupe: "Liens de paiement", titre: l.title, sous: `${formaterMontant(l.amount, l.currency)} · /pay/${l.slug}`, href: `/payment-links` })),
+        ...tx.map((t) => ({ id: `t-${t.id}`, type: "transaction", groupe: "Transactions", titre: `${t.orderId}, ${formaterMontant(t.amount, t.currency)}`, sous: `${t.customerName || "client inconnu"}, ${STATUT_FR[t.status] || t.status}, ${new Date(t.createdAt).toLocaleDateString("fr-FR")}`, href: `/transactions/${t.id}` })),
+        ...clients.map((c) => ({ id: `c-${c.id}`, type: "client", groupe: "Clients", titre: c.name || c.email, sous: [c.email, c.phone].filter(Boolean).join(", "), href: `/customers?q=${encodeURIComponent(c.email || c.name || "")}` })),
+        ...liens.map((l) => ({ id: `l-${l.id}`, type: "lien", groupe: "Liens de paiement", titre: l.title, sous: `${formaterMontant(l.amount, l.currency)}, /pay/${l.slug}`, href: `/payment-links` })),
     ];
 }
 

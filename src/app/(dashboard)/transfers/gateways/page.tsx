@@ -91,7 +91,7 @@ export default function PasserellesTransfertPage() {
                                         {p.saitEnvoyer && p.manquants.length > 0 && (
                                             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-[12.5px]" style={{ background: "var(--dt-item-hover)", color: "var(--dt-text-secondary)" }}>
                                                 <span>Il manque : {p.manquants.join(", ")}.</span>
-                                                <Link href={`/gateways/${p.id}`} className="inline-flex items-center gap-1 font-medium underline underline-offset-2" style={{ color: "var(--dt-text-primary)" }}>Compléter les clés <ExternalLink className="h-3 w-3" /></Link>
+                                                <Link href="/gateways" className="inline-flex items-center gap-1 font-medium underline underline-offset-2" style={{ color: "var(--dt-text-primary)" }}>Compléter les clés <ExternalLink className="h-3 w-3" /></Link>
                                             </div>
                                         )}
                                         {p.saitEnvoyer && p.avertissement && <p className="mt-3 text-[12px]" style={{ color: "var(--dt-text-muted)" }}>{p.avertissement}</p>}

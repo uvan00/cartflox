@@ -30,6 +30,30 @@ const LOGOS = [
 
 type Lien = Awaited<ReturnType<typeof getPaymentLinkBySlug>>;
 
+/**
+ * Pixel Meta du marchand. Un <script> ecrit par React apres le montage n'est
+ * jamais execute (balise « inseree par l'analyseur ») : le pixel ne comptait
+ * rien. On l'ajoute donc au document par un effet. Chiffres seulement.
+ */
+function PixelFacebook({ id }: { id: string }) {
+    useEffect(() => {
+        const pixel = id.replace(/[^0-9]/g, "");
+        if (!pixel || document.getElementById("cf-pixel-meta")) return;
+        const w = window as any;
+        if (!w.fbq) {
+            const n: any = (w.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); });
+            if (!w._fbq) w._fbq = n;
+            n.push = n; n.loaded = true; n.version = "2.0"; n.queue = [];
+            const s = document.createElement("script");
+            s.id = "cf-pixel-meta"; s.async = true; s.src = "https://connect.facebook.net/en_US/fbevents.js";
+            document.head.appendChild(s);
+        }
+        w.fbq("init", pixel);
+        w.fbq("track", "PageView");
+    }, [id]);
+    return null;
+}
+
 export default function PublicPaymentPage() {
     const params = useParams();
     const slug = params.slug as string;
@@ -54,17 +78,23 @@ export default function PublicPaymentPage() {
         if (!slug) return;
         (async () => {
             setIsLoading(true);
-            const data = await getPaymentLinkBySlug(slug);
-            if (data) {
-                setLink(data);
-                const perso = data.theme?.perso;
-                setTheme(perso && typeof perso === "object"
-                    ? { ...getThemeById("cartflox"), ...perso, id: "custom", name: "Personnalisé" }
-                    : getThemeById(data.theme?.id || "cartflox"));
-                // Montant suggere par le marchand : pre-rempli, modifiable.
-                if (data.amountFree && data.amount > 0) setMontantLibre(String(data.amount));
+            try {
+                const data = await getPaymentLinkBySlug(slug);
+                if (data) {
+                    setLink(data);
+                    const perso = data.theme?.perso;
+                    setTheme(perso && typeof perso === "object"
+                        ? { ...getThemeById("cartflox"), ...perso, id: "custom", name: "Personnalisé" }
+                        : getThemeById(data.theme?.id || "cartflox"));
+                    // Montant suggere par le marchand : pre-rempli, modifiable.
+                    if (data.amountFree && data.amount > 0) setMontantLibre(String(data.amount));
+                }
+            } catch {
+                // Reseau ou action serveur perimee : l'ecran « lien introuvable » vaut
+                // mieux qu'un squelette anime sans fin.
+            } finally {
+                setIsLoading(false);
             }
-            setIsLoading(false);
         })();
     }, [slug]);
 
@@ -291,21 +321,7 @@ export default function PublicPaymentPage() {
             </form>
             <PiedCarte theme={theme} whatsapp={whatsapp} />
 
-            {/* Injected Marketing Scripts (Headless) */}
-            {/* SECURITY: pixel ID is sanitized to digits only below to prevent
-                script injection into this inline <script>. */}
-            {link.facebookPixelId && (
-                <script dangerouslySetInnerHTML={{
-                    __html: `
-                    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-                    n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
-                    n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
-                    t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
-                    document,'script','https://connect.facebook.net/en_US/fbevents.js');
-                    fbq('init', '${String(link.facebookPixelId).replace(/[^0-9]/g, '')}');
-                    fbq('track', 'PageView');
-                `}} />
-            )}
+            {link.facebookPixelId && <PixelFacebook id={String(link.facebookPixelId)} />}
         </Coque>
     );
 }

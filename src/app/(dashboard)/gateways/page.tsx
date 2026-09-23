@@ -127,7 +127,7 @@ export default function GatewaysPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {tuile("Passerelles connectées", chargement ? "…" : String(stats.connectees), stats.connectees === 0 ? "Aucune pour l'instant" : `${stats.actives} active${stats.actives > 1 ? "s" : ""}${stats.connectees - stats.actives > 0 ? `, ${stats.connectees - stats.actives} en pause` : ""}`, Globe)}
                 {tuile("Moyens proposés à vos clients", chargement ? "…" : String(stats.moyensActifs), "Orange Money, Wave, MTN, carte…", Smartphone)}
-                {tuile("Environnement", chargement ? "…" : stats.test > 0 ? "Test" : "Live", stats.test > 0 ? `${stats.test} passerelle${stats.test > 1 ? "s" : ""} avec des clés de test` : stats.actives > 0 ? "Argent réel, clés de production" : "Se règle passerelle par passerelle", Zap)}
+                {tuile("Environnement", chargement ? "…" : stats.test > 0 ? "Test" : "Production", stats.test > 0 ? `${stats.test} passerelle${stats.test > 1 ? "s" : ""} avec des clés de test` : stats.actives > 0 ? "Argent réel, clés de production" : "Se règle passerelle par passerelle", Zap)}
             </div>
 
             {/* Passerelles connectees */}
@@ -182,7 +182,7 @@ export default function GatewaysPage() {
             </Bloc>
 
             {/* Routage */}
-            <Link href="/methods?tab=routing" className="flex flex-wrap items-center gap-3 rounded-xl px-5 py-4 transition-colors hover:bg-white/[0.02]" style={{ ...carte, textDecoration: "none" }}>
+            <Link href="/methods?tab=routage" className="flex flex-wrap items-center gap-3 rounded-xl px-5 py-4 transition-colors hover:bg-white/[0.02]" style={{ ...carte, textDecoration: "none" }}>
                 <span className="grid h-10 w-10 shrink-0 place-content-center rounded-lg" style={{ background: "rgba(31,147,255,0.12)", color: "var(--dt-brand)" }}><Route className="h-[18px] w-[18px]" /></span>
                 <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold" style={{ color: "var(--dt-text-primary)" }}>Routage intelligent</span>

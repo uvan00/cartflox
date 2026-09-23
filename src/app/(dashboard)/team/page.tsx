@@ -78,7 +78,7 @@ export default function EquipePage() {
                                     <Pastille label={PERMISSIONS.find((p) => p.value === m.permission)?.label || m.permission} couleur={COULEUR[m.permission] || "#94a3b8"} />
                                     {m.role && <span className="text-[11px]" style={{ color: "var(--dt-text-muted)" }}>{m.role}</span>}
                                 </div>
-                                <p className="mt-1.5 text-[11px]" style={{ color: "var(--dt-text-muted)" }}>Invité le {fmtDate(m.createdAt)}{m.lastActive && m.lastActive !== "Jamais" ? ` · vu ${m.lastActive}` : ""}</p>
+                                <p className="mt-1.5 text-[11px]" style={{ color: "var(--dt-text-muted)" }}>Invité le {fmtDate(m.createdAt)}{m.lastActive && m.lastActive !== "Jamais" ? `, vu ${m.lastActive}` : ""}</p>
                             </div>
                         </div>
                     ))}
@@ -91,7 +91,7 @@ export default function EquipePage() {
                         {journal.map((l) => (
                             <div key={l.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
                                 <span style={{ color: "var(--dt-text-primary)" }}>{l.action}</span>
-                                <span className="text-xs" style={{ color: "var(--dt-text-muted)" }}>{l.actorName} · {fmtDate(l.createdAt)}</span>
+                                <span className="text-xs" style={{ color: "var(--dt-text-muted)" }}>{l.actorName}, {fmtDate(l.createdAt)}</span>
                             </div>
                         ))}
                     </div>

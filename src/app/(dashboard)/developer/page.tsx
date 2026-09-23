@@ -68,7 +68,7 @@ export default function ApiLogsPage() {
         setWebhook(c?.webhookUrl || "");
         setWebhookTest(c?.testWebhookUrl || "");
         setEvenements(Array.isArray(c?.webhookEvents) && c.webhookEvents.length ? c.webhookEvents : EVENEMENTS.map((e) => e.cle));
-    });
+    }).catch(() => setCfg(null));
     const chargerLivraisons = () => listerLivraisons({ limite: 50 }).then(setLivraisons).catch(() => setLivraisons([]));
     useEffect(() => {
         charger();
@@ -110,7 +110,7 @@ export default function ApiLogsPage() {
     }
 
     return (
-        <Page titre="API & Logs" sousTitre="Vos identifiants d'intégration, l'adresse qui reçoit vos confirmations de paiement, et l'activité réelle de votre API." large>
+        <Page titre="API et journaux" sousTitre="Vos identifiants d'intégration, l'adresse qui reçoit vos confirmations de paiement, et l'activité réelle de votre API." large>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <Bloc titre={<span className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> Clés de production</span>} sousTitre={verrouille ? "Elles apparaîtront ici une fois votre identité vérifiée. D'ici là, votre espace est en sandbox et fonctionne avec les clés de test." : "La clé publique peut figurer dans une page web (widget, SoftPay). La clé secrète reste sur votre serveur : elle crée des paiements et signe vos webhooks."}
                     action={verrouille ? undefined : <Bouton variante="secondaire" icone={RefreshCw} chargement={occupe === "rot"} onClick={() => tourner("live")}>Régénérer</Bouton>}>
@@ -122,7 +122,7 @@ export default function ApiLogsPage() {
                         <div className="space-y-3">
                             <Cle label="Clé publique" valeur={cfg.publicKey} couleur="#60a5fa" />
                             <Cle label="Clé secrète" valeur={cfg._plaintext === false ? null : cfg.secretKey} couleur="#0bd8b6" secrete aide={cfg._plaintext === false ? "Cette clé a été créée avant le chiffrement : régénérez-la pour pouvoir la relire." : "Ne la partagez jamais, ne la mettez jamais dans une page web."} />
-                            <p className="text-[11px] break-words" style={{ color: "var(--dt-text-muted)" }}>Identifiant d&apos;application : <code className="font-mono break-all">{cfg.applicationId}</code> · dernière rotation : {fmtDate(cfg.lastRotationAt) || "jamais"}</p>
+                            <p className="text-[11px] break-words" style={{ color: "var(--dt-text-muted)" }}>Identifiant d&apos;application : <code className="font-mono break-all">{cfg.applicationId}</code>, dernière rotation : {fmtDate(cfg.lastRotationAt) || "jamais"}</p>
                         </div>
                     )}
                 </Bloc>
@@ -193,7 +193,7 @@ export default function ApiLogsPage() {
                                             </td>
                                             <td className="px-3 py-2.5"><Pastille label={s.label} couleur={s.couleur} /></td>
                                             <td className="px-3 py-2.5 tabular-nums" style={{ color: "var(--dt-text-secondary)" }}>{l.attempts}/{l.max_attempts}</td>
-                                            <td className="px-3 py-2.5 text-xs" style={{ color: "var(--dt-text-muted)" }} title={l.last_error || ""}>{l.last_status_code ? `HTTP ${l.last_status_code}` : (l.last_error || "")}{l.response_ms != null ? ` · ${l.response_ms} ms` : ""}</td>
+                                            <td className="px-3 py-2.5 text-xs" style={{ color: "var(--dt-text-muted)" }} title={l.last_error || ""}>{l.last_status_code ? `HTTP ${l.last_status_code}` : (l.last_error || "")}{l.response_ms != null ? `, ${l.response_ms} ms` : ""}</td>
                                             <td className="px-3 py-2.5 text-right"><Bouton variante="secondaire" icone={Send} chargement={occupe === `re-${l.id}`} onClick={() => renvoyer(l.id)}>Renvoyer</Bouton></td>
                                         </tr>
                                     ); })}

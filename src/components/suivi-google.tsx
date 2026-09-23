@@ -31,8 +31,16 @@ function retenirLeClic() {
     } catch { /* pas de cookie possible : on continue sans */ }
 }
 
+/** Pages de paiement : aucun cookie de mesure sans consentement (pas de bandeau la-bas). */
+function pagePaiement() {
+    if (/^checkout\./i.test(window.location.hostname)) return true;
+    const chemin = window.location.pathname;
+    return chemin.startsWith("/checkout") || chemin.startsWith("/pay/") || chemin.startsWith("/mobile/");
+}
+
 export function SuiviGoogle() {
     useEffect(() => {
+        if (pagePaiement()) return;
         retenirLeClic();
         if (document.getElementById("cf-google-tag")) return;
         let annule = false;

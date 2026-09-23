@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { MARQUE } from "@/lib/marque";
 
 /**
  * Textes des pages de paiement vues par le CLIENT (checkout heberge, lien de
@@ -56,9 +57,13 @@ const FR = {
     finaliserez_page: "Vous finaliserez sur la page sécurisée de {passerelle}, puis reviendrez ici.",
     pays_ou_indicatif: "Pays ou indicatif",
     bon_retour: "Bon retour",
-    paiements_reussis_un: "{n} paiement réussi sur le réseau Cartflox",
-    paiements_reussis_plusieurs: "{n} paiements réussis sur le réseau Cartflox",
-    reconnu_reseau: "Reconnu sur le réseau Cartflox",
+    paiements_reussis_un: `{n} paiement réussi sur le réseau ${MARQUE}`,
+    paiements_reussis_plusieurs: `{n} paiements réussis sur le réseau ${MARQUE}`,
+    reconnu_reseau: `Reconnu sur le réseau ${MARQUE}`,
+    trop_de_tentatives: "Trop de tentatives, patientez une minute puis réessayez.",
+    paiement_rembourse: "Ce paiement a été remboursé : il n'y a plus rien à régler.",
+    chargement_impossible: "Impossible de charger la page de paiement. Vérifiez votre connexion, puis réessayez.",
+    reessayer: "Réessayer",
     meilleure_route: "Meilleure route : {route}",
     payer_montant: "Payer {montant} {devise}",
     aucun_frais: "Aucun frais caché. Le montant est débité une seule fois, après votre confirmation.",
@@ -277,9 +282,13 @@ const EN: Record<Cle, string> = {
     finaliserez_page: "You will finish on the secure page of {passerelle}, then come back here.",
     pays_ou_indicatif: "Country or dialling code",
     bon_retour: "Welcome back",
-    paiements_reussis_un: "{n} successful payment on the Cartflox network",
-    paiements_reussis_plusieurs: "{n} successful payments on the Cartflox network",
-    reconnu_reseau: "Recognised on the Cartflox network",
+    paiements_reussis_un: `{n} successful payment on the ${MARQUE} network`,
+    paiements_reussis_plusieurs: `{n} successful payments on the ${MARQUE} network`,
+    reconnu_reseau: `Recognised on the ${MARQUE} network`,
+    trop_de_tentatives: "Too many attempts, wait a minute and try again.",
+    paiement_rembourse: "This payment has been refunded: there is nothing left to pay.",
+    chargement_impossible: "The payment page could not be loaded. Check your connection, then try again.",
+    reessayer: "Try again",
     meilleure_route: "Best route: {route}",
     payer_montant: "Pay {montant} {devise}",
     aucun_frais: "No hidden fees. The amount is charged once, after your confirmation.",

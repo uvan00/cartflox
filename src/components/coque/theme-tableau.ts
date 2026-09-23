@@ -13,13 +13,13 @@ const CLE = "afriflow-dashboard-theme";
  * coque suivent eux aussi.
  */
 export function useThemeTableau(surcharges?: Record<string, string>) {
-    const [theme, setTheme] = useState<DashboardTheme>(() => {
-        if (typeof window !== "undefined") {
-            const memo = localStorage.getItem(CLE);
-            if (memo) return getDashboardTheme(memo);
-        }
-        return getDashboardTheme("dark");
-    });
+    // Sombre au premier rendu, comme le HTML du serveur : lire le choix pendant
+    // le rendu donnait un premier passage clair que l'hydratation ne corrigeait
+    // pas (variables sombres restees dans le DOM, page illisible en theme clair).
+    const [theme, setTheme] = useState<DashboardTheme>(() => getDashboardTheme("dark"));
+    useEffect(() => {
+        try { const memo = localStorage.getItem(CLE); if (memo) setTheme(getDashboardTheme(memo)); } catch { /* stockage indisponible */ }
+    }, []);
 
     useEffect(() => {
         const changer = (e: Event) => {

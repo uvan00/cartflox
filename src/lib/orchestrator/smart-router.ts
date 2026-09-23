@@ -623,7 +623,7 @@ export function routePayment(ctx: RoutingContext): RoutingDecision {
         const fallback = ctx.availableProviders[0];
         return {
             provider: fallback,
-            reason: 'Aucun fournisseur spécifique trouvé — utilisation du premier disponible',
+            reason: 'Aucun fournisseur spécifique trouvé : utilisation du premier disponible',
             alternates: ctx.availableProviders.slice(1),
             confidence: 0.3,
         };

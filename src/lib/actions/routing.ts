@@ -254,7 +254,7 @@ export async function simulateRouting(input: SimulationInput): Promise<Simulatio
         if (assigned) {
             steps.push({
                 label: 'Override méthode → passerelle',
-                detail: `${input.methodCode} (${input.country}) est assignée à ${nameOf(assigned)} — court-circuite l'algorithme.`,
+                detail: `${input.methodCode} (${input.country}) est assignée à ${nameOf(assigned)} : court-circuite l'algorithme.`,
             });
         }
         steps.push({
@@ -264,7 +264,7 @@ export async function simulateRouting(input: SimulationInput): Promise<Simulatio
         if (cfg.allowedProviders?.length && cfg.allowedProviders.length < gateways.length) {
             steps.push({
                 label: 'Filtre passerelles autorisées',
-                detail: cfg.allowedProviders.map(nameOf).join(' · '),
+                detail: cfg.allowedProviders.map(nameOf).join(', '),
             });
         }
         const maxAttempts = Math.min(ordered.length, (cfg.maxRetries ?? 3) + 1);
@@ -295,12 +295,12 @@ function algoExplanation(
 ): string {
     switch (kind) {
         case 'SINGLE':
-            return `Une seule passerelle utilisée — ${ordered[0] ? nameOf(ordered[0]) : '(aucune)'}.`;
+            return `Une seule passerelle utilisée : ${ordered[0] ? nameOf(ordered[0]) : '(aucune)'}.`;
         case 'PRIORITY':
             return `Ordre essayé : ${ordered.map(nameOf).join(' → ')}`;
         case 'VOLUME_SPLIT': {
             const total = (cfg.volumeSplits || []).reduce((s, e) => s + e.split, 0);
-            const splits = (cfg.volumeSplits || []).map(e => `${nameOf(e.gatewayId)} ${e.split}%`).join(' · ');
+            const splits = (cfg.volumeSplits || []).map(e => `${nameOf(e.gatewayId)} ${e.split}%`).join(', ');
             return total === 100
                 ? `Tirage pondéré : ${splits}. Gagnant pour cette simulation : ${ordered[0] ? nameOf(ordered[0]) : '(aucun)'}.`
                 : `⚠️ Volume splits ne totalise pas 100% (${total}%).`;

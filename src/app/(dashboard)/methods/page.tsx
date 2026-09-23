@@ -64,16 +64,14 @@ export default function MethodesPage() {
 
     async function basculer(m: any) {
         setOccupe(m.id);
-        const r = await togglePaymentMethod(m.id, !m.isActive, { name: m.name, country: m.country, provider: m.gateway, flag: m.flag, type: m.type === "Card" ? "CARD" : "MOBILE_MONEY", logo: m.logo, code: m.code });
-        setOccupe("");
+        const r = await togglePaymentMethod(m.id, !m.isActive, { name: m.name, country: m.country, provider: m.gateway, flag: m.flag, type: m.type === "Card" ? "CARD" : "MOBILE_MONEY", logo: m.logo, code: m.code }).catch(() => ({ success: false, error: "Réseau indisponible" })).finally(() => setOccupe(""));
         if (r?.success === false) { goeyToast.error(r.error || "Échec"); return; }
         goeyToast.success(!m.isActive ? `${m.name} proposé à vos clients` : `${m.name} masqué`);
         charger();
     }
     async function attribuer(m: any, gatewayId: string) {
         setOccupe(m.id + ":g");
-        const r = await assignMethodProvider(m.code, m.country, gatewayId);
-        setOccupe("");
+        const r = await assignMethodProvider(m.code, m.country, gatewayId).catch(() => ({ success: false, error: "Réseau indisponible" })).finally(() => setOccupe(""));
         if (!r.success) { goeyToast.error(r.error || "Échec"); return; }
         goeyToast.success(gatewayId ? `${m.name} : servi par ${nomPasserelle(gatewayId)}` : `${m.name} : choix automatique`);
         charger();
@@ -89,13 +87,13 @@ export default function MethodesPage() {
         }
         if (config.algorithmKind === "SINGLE" && config.fallbackOrder.length === 0) { goeyToast.error("Choisissez la passerelle."); return; }
         setOccupe("save");
-        const r = await saveRoutingConfig(config);
-        setOccupe("");
+        const r = await saveRoutingConfig(config).catch(() => ({ success: false, error: "Réseau indisponible" })).finally(() => setOccupe(""));
         r.success ? goeyToast.success("Routage enregistré") : goeyToast.error(r.error || "Échec");
     }
-    const deplacer = (i: number, sens: -1 | 1) => {
-        if (!config) return;
-        const l = [...config.fallbackOrder]; const j = i + sens;
+    // Sur la liste AFFICHEE (ordre enregistre complete des passerelles manquantes) :
+    // deplacer depuis config.fallbackOrder, souvent vide, ne faisait rien au premier clic.
+    const deplacerDans = (liste: string[], i: number, sens: -1 | 1) => {
+        const l = [...liste]; const j = i + sens;
         if (j < 0 || j >= l.length) return;
         [l[i], l[j]] = [l[j], l[i]]; maj({ fallbackOrder: l });
     };
@@ -144,7 +142,7 @@ export default function MethodesPage() {
                                             <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white">{m.logo ? <img src={m.logo} alt="" className="h-6 w-6 object-contain" /> : <span className="text-xs font-bold text-black">{(m.name || "?").charAt(0)}</span>}</span>
                                             <div className="min-w-[160px] flex-1">
                                                 <p className="text-sm font-medium" style={{ color: m.isActive ? "var(--dt-text-primary)" : "var(--dt-text-muted)" }}>{m.name}</p>
-                                                <p className="text-[11px]" style={{ color: "var(--dt-text-muted)" }}>{m.type === "Card" ? "Carte bancaire" : "Mobile Money"}{plusieurs ? ` · ${m.providers.length} passerelles disponibles` : ` · via ${m.gateway}`}</p>
+                                                <p className="text-[11px]" style={{ color: "var(--dt-text-muted)" }}>{m.type === "Card" ? "Carte bancaire" : "Mobile Money"}{plusieurs ? `, ${m.providers.length} passerelles disponibles` : `, via ${m.gateway}`}</p>
                                             </div>
                                             {plusieurs ? (
                                                 <Choix value={attribue} onChange={(v) => attribuer(m, v)} disabled={occupe === m.id + ":g"} options={[{ value: "", label: "Automatique (routage)" }, ...m.providers.map((p: any) => ({ value: p.gatewayId, label: `Servi par ${p.provider}` }))]} />
@@ -190,8 +188,8 @@ export default function MethodesPage() {
                                             <div key={id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: "var(--dt-item-hover)" }}>
                                                 <span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold" style={{ background: i === 0 ? "#12a594" : "var(--dt-card-bg)", color: i === 0 ? "#ffffff" : "var(--dt-text-muted)" }}>{i + 1}</span>
                                                 <span className="flex-1 text-sm" style={{ color: "var(--dt-text-primary)" }}>{nomPasserelle(id)}{i === 0 && <span className="ml-2 text-[11px]" style={{ color: "#12a594" }}>principale</span>}</span>
-                                                <button type="button" onClick={() => { maj({ fallbackOrder: ordreComplet }); setTimeout(() => deplacer(i, -1), 0); }} disabled={i === 0} className="rounded p-1 disabled:opacity-30" style={{ color: "var(--dt-text-muted)" }} aria-label="Monter"><ArrowUp className="h-4 w-4" /></button>
-                                                <button type="button" onClick={() => { maj({ fallbackOrder: ordreComplet }); setTimeout(() => deplacer(i, 1), 0); }} disabled={i === ordreComplet.length - 1} className="rounded p-1 disabled:opacity-30" style={{ color: "var(--dt-text-muted)" }} aria-label="Descendre"><ArrowDown className="h-4 w-4" /></button>
+                                                <button type="button" onClick={() => deplacerDans(ordreComplet, i, -1)} disabled={i === 0} className="rounded p-1 disabled:opacity-30" style={{ color: "var(--dt-text-muted)" }} aria-label="Monter"><ArrowUp className="h-4 w-4" /></button>
+                                                <button type="button" onClick={() => deplacerDans(ordreComplet, i, 1)} disabled={i === ordreComplet.length - 1} className="rounded p-1 disabled:opacity-30" style={{ color: "var(--dt-text-muted)" }} aria-label="Descendre"><ArrowDown className="h-4 w-4" /></button>
                                             </div>
                                         ))}
                                     </div>

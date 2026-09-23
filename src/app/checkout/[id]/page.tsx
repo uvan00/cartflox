@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { MARQUE } from "@/lib/marque";
 import { motion, AnimatePresence } from "framer-motion";
 import { preconnect } from "react-dom";
 import { arrondirMontant } from "@/lib/devises";
@@ -34,6 +35,15 @@ import { useLangue, t, nomPays, localeNombre, type Langue, type Cle } from "@/li
 
 // SECURITY (open redirect): only follow http(s) absolute URLs. Blocks javascript:
 // and other dangerous schemes from merchant-supplied success_url/cancel_url.
+/** Ce que l'acheteur peut lire : un message anglais ou technique devient une phrase generique. */
+function messageAcheteur(brut: unknown, langue: Langue, defaut: string): string {
+    const m = typeof brut === "string" ? brut.trim() : "";
+    if (!m) return defaut;
+    if (/too many requests|rate limit|trop de (requêtes|tentatives)/i.test(m)) return t(langue, "trop_de_tentatives");
+    if (/^[A-Za-z0-9 _.,'":()/-]{0,200}$/.test(m) && /\b(the|please|invalid|error|failed|not|request)\b/i.test(m)) return defaut;
+    return m;
+}
+
 function safeRedirect(raw: unknown) {
     if (typeof raw !== "string" || !raw) return;
     try {
@@ -273,19 +283,19 @@ const PHONE_FORMAT: Record<string, { placeholder: string; maxLen: number }> = {
     CM: { placeholder: '6XX XXX XXX',    maxLen: 9  }, // 9 digits (starts with 6)
     GA: { placeholder: '07 XX XX XX',    maxLen: 8  }, // 8 digits (07x/06x/04x)
     CG: { placeholder: '06 XXX XX XX',   maxLen: 9  }, // 9 digits
-    CD: { placeholder: '81X XXX XXX',    maxLen: 9  }, // 9 digits (81x/82x/84x/85x/89x/90x/97x/99x)
+    CD: { placeholder: '81X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0 (81x/82x/84x/85x/89x/90x/97x/99x)
     TD: { placeholder: '63 XX XX XX',    maxLen: 8  }, // 8 digits
     CF: { placeholder: '75 XX XX XX',    maxLen: 8  }, // 8 digits
     // Other African
     GN: { placeholder: '628 XX XX XX',   maxLen: 9  }, // 9 digits (62x/63x/64x/65x/66x)
-    GH: { placeholder: '054 XXX XXXX',   maxLen: 9  }, // 9 digits (020/023/024/026/027/028/050/054/055/057/059)
-    NG: { placeholder: '0803 XXX XXXX',  maxLen: 10 }, // 10 digits (070/080/081/090/091)
-    KE: { placeholder: '712 XXX XXX',    maxLen: 9  }, // 9 digits (7xx)
-    TZ: { placeholder: '7XX XXX XXX',    maxLen: 9  }, // 9 digits
-    UG: { placeholder: '75X XXX XXX',    maxLen: 9  }, // 9 digits
-    RW: { placeholder: '78X XXX XXX',    maxLen: 9  }, // 9 digits
-    ZA: { placeholder: '71 XXX XXXX',    maxLen: 9  }, // 9 digits (excluding leading 0)
-    MG: { placeholder: '32X XX XXX',     maxLen: 9  }, // 9 digits (32x/33x/34x/38x)
+    GH: { placeholder: '054 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (020/023/024/026/027/028/050/054/055/057/059)
+    NG: { placeholder: '0803 XXX XXXX',  maxLen: 11 }, // 11 chiffres avec le 0 (070/080/081/090/091)
+    KE: { placeholder: '712 XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0 (07xx)
+    TZ: { placeholder: '7XX XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
+    UG: { placeholder: '75X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
+    RW: { placeholder: '78X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
+    ZA: { placeholder: '71 XXX XXXX',    maxLen: 10 }, // 10 chiffres avec le 0
+    MG: { placeholder: '32X XX XXX',     maxLen: 10 }, // 10 chiffres avec le 0 (032/33x/34x/38x)
     SL: { placeholder: '76 XX XXXX',     maxLen: 8  }, // 8 digits
     MR: { placeholder: '36 XX XX XX',    maxLen: 8  }, // 8 digits
     // Afrique de l'Est et australe (couverture PawaPay, Flutterwave, Paystack)
@@ -632,6 +642,8 @@ export default function CheckoutPage() {
                 // Deja payee : on affiche directement l'ecran de succes, jamais le
                 // formulaire (evite un second paiement / la confusion).
                 if (tx.status === 'SUCCESS') setPaymentStatus('success');
+                if (tx.status === 'CANCELLED') setDernierEchec(tr("paiement_annule"));
+                if (tx.status === 'REFUNDED') setDernierEchec(tr("paiement_rembourse"));
                 // Strip international prefix if already present - store only local digits (keep leading zero for countries that need it e.g. CI, NG, GH)
                 const rawPhone = tx.customerPhone || "";
                 // Beaucoup de marchands envoient l'international sans le "+"
@@ -682,7 +694,7 @@ export default function CheckoutPage() {
                     } catch (e) { }
                 }
             }
-        } catch (error) { goeyToast.error(tr("erreur_chargement")); }
+        } catch (error) { setErreurChargement(true); }
         setIsLoading(false);
 
         // Check for Express profile
@@ -773,7 +785,7 @@ export default function CheckoutPage() {
     // Session countdown - starts after transaction loads, resets on interaction, pauses during payment
     useEffect(() => {
         if (!transaction || paymentStatus === 'success' || paymentStatus === 'verifying') return;
-        if (paymentStatus === 'initiating' || paymentStatus === 'pending_user' || paymentStatus === 'require_otp') return;
+        if (paymentStatus === 'initiating' || paymentStatus === 'pending_user' || paymentStatus === 'require_otp' || paymentStatus === 'carte') return;
         sessionTimerRef.current = setInterval(() => {
             setSessionSecondsLeft(prev => {
                 if (prev <= 1) {
@@ -797,6 +809,8 @@ export default function CheckoutPage() {
     const paysDuNumeroRef = useRef<string | null>(null);
     // Lien d'application (Wave, Djamo) : bouton d'ouverture et QR code sur NOTRE page.
     const [lienApplication, setLienApplication] = useState<{ url: string; nom: string; qr?: string | null } | null>(null);
+    // Chargement impossible (reseau, action serveur perimee) : ce n'est pas un lien mort.
+    const [erreurChargement, setErreurChargement] = useState(false);
     // Mode test : l'ecran qui propose de simuler l'issue du paiement.
     const [modeTestAttente, setModeTestAttente] = useState(false);
     const [simulationEnCours, setSimulationEnCours] = useState(false);
@@ -806,7 +820,7 @@ export default function CheckoutPage() {
 
     const sessionMinsLeft = Math.floor(sessionSecondsLeft / 60);
     const sessionSecsDisplay = sessionSecondsLeft % 60;
-    const showSessionWarning = sessionSecondsLeft <= 120 && !!transaction && !paymentStatus;
+    const showSessionWarning = sessionSecondsLeft > 0 && sessionSecondsLeft <= 120 && !!transaction && !paymentStatus;
 
     const getInstructions = (method: any) => {
         const name = method.name.toLowerCase();
@@ -879,7 +893,7 @@ export default function CheckoutPage() {
                 // il previent par cet evenement, et sans l'ecouter on ne voit
                 // qu'un cadre gris qui ne se remplit jamais.
                 champ.on("loaderror", (e: any) => {
-                    if (!annule) setDernierEchec(e?.error?.message || tr("carte_chargement_echec"));
+                    if (!annule) setDernierEchec(messageAcheteur(e?.error?.message, langue, tr("carte_chargement_echec")));
                     journaliserEchecCarte(transaction?.id || "", { code: "loaderror", type: "chargement", message: e?.error?.message || "" }).catch(() => { });
                 });
                 champ.on("ready", () => { if (!annule) setFormulairePret(true); });
@@ -995,7 +1009,7 @@ export default function CheckoutPage() {
             });
 
             if (response.sandbox) { setModeTestAttente(true); setPaymentStatus('pending_user'); return; }
-            if (!response.success) { setPaymentStatus(null); setDernierEchec(response.message || tr("echec_paiement")); goeyToast.error(response.message || tr("echec_paiement")); return; }
+            if (!response.success) { setPaymentStatus(null); setDernierEchec(messageAcheteur(response.message, langue, tr("echec_paiement"))); return; }
 
             // Carte : on reste ici, le formulaire de Stripe se monte sous le choix.
             if (response.status === 'INLINE_CARD' && response.clientSecret && response.publishableKey) {
@@ -1039,7 +1053,7 @@ export default function CheckoutPage() {
                 setPaymentStatus('require_otp');
             }
             else setPaymentStatus('pending_user');
-        } catch (error) { setPaymentStatus(null); setDernierEchec(tr("erreur_technique")); goeyToast.error(tr("erreur_technique")); }
+        } catch (error) { setPaymentStatus(null); setDernierEchec(tr("erreur_technique")); }
     };
 
     /** Mode test : denoue le paiement comme le ferait l'operateur, sans argent. */
@@ -1096,9 +1110,8 @@ export default function CheckoutPage() {
             // part (l'intention restait « requires_payment_method » chez Stripe, sans
             // motif) et le marchand ne pouvait rien expliquer a son client.
             journaliserEchecCarte(transaction.id, { code: error.code, decline_code: error.decline_code, type: error.type, message: error.message }).catch(() => { });
-            const clair = messageCarte(error, langue) || error.message || tr("paiement_refuse");
+            const clair = messageCarte(error, langue) || messageAcheteur(error.message, langue, tr("paiement_refuse"));
             setDernierEchec(clair);
-            goeyToast.error(clair);
             // L'acheteur reste sur le formulaire, sa carte toujours saisie, pour
             // corriger ou reessayer. Un champ en vrac (exception) est refait a neuf.
             if (error.type === "integration_error" && secretCarteRef.current) {
@@ -1118,8 +1131,8 @@ export default function CheckoutPage() {
                 body: JSON.stringify({ transactionId: transaction.id }),
             }).then((x) => x.json());
             if (r?.status === 'SUCCESS' || r?.success === true) { setPaymentStatus('success'); notifyParentSuccess(); }
-            else setPaymentStatus('pending_user');
-        } catch { setPaymentStatus('pending_user'); }
+            else setPaymentStatus('verifying');
+        } catch { setPaymentStatus('verifying'); }
     };
 
     // Notify parent window (widget iframe → parent site)
@@ -1153,10 +1166,10 @@ export default function CheckoutPage() {
         try {
             const response = await initiateSoftPayment({
                 transactionId: transaction.id, gatewayId: method.gatewayId, methodCode: method.code,
-                customerDetails: { name: transaction.customerName, email: transaction.customerEmail, phone: expressProfile.phone, country: expressProfile.countryCode }
+                customerDetails: { name: transaction.customerName, email: transaction.customerEmail, phone: parsePhoneNumberFromString(expressProfile.phone, expressProfile.countryCode as any)?.number || expressProfile.phone, country: expressProfile.countryCode }
             });
             if (response.sandbox) { setModeTestAttente(true); setPaymentStatus('pending_user'); return; }
-            if (!response.success) { setPaymentStatus(null); setDernierEchec(response.message || tr("echec_paiement")); goeyToast.error(response.message || tr("echec_paiement")); return; }
+            if (!response.success) { setPaymentStatus(null); setDernierEchec(messageAcheteur(response.message, langue, tr("echec_paiement"))); return; }
             if (response.status === 'APP_LINK' && response.redirectUrl) { setLienApplication({ url: response.redirectUrl, nom: response.application || tr("l_application"), qr: response.qr || null }); setPaymentStatus('pending_user'); return; }
             if (typeof response.rawData?._instructions === 'string' && response.rawData._instructions) setConsigneFournisseur(response.rawData._instructions);
             if ((response.status === 'REDIRECT' || response.redirectUrl) && response.redirectUrl) { setPaymentStatus('verifying'); redirectViaParent(response.redirectUrl); return; }
@@ -1178,7 +1191,7 @@ export default function CheckoutPage() {
                 setPaymentStatus('require_otp');
             }
             else setPaymentStatus('pending_user');
-        } catch (error) { setPaymentStatus(null); setDernierEchec(tr("erreur_technique")); goeyToast.error(tr("erreur_technique")); }
+        } catch (error) { setPaymentStatus(null); setDernierEchec(tr("erreur_technique")); }
     };
 
     const handleVerifyOtp = async () => {
@@ -1257,14 +1270,16 @@ export default function CheckoutPage() {
                     const precis = echec ? [echec.message, echec.action].filter(Boolean).join(" ") : "";
                     const msg = precis || (tx.status === 'CANCELLED' ? tr("paiement_annule") : tr("paiement_echoue_reessayer"));
                     setDernierEchec(msg);
-                    goeyToast.error(msg);
                     return;
                 }
             } catch { /* network hiccup - keep polling */ }
             if (Date.now() - startedAt < POLL_MAX_MS) {
                 timer = setTimeout(tick, POLL_EVERY_MS);
             } else {
-                goeyToast.error(tr("confirmation_attente_longue"));
+                // Rien n'est venu de l'operateur : on rend la main a l'acheteur, avec
+                // l'explication dans la carte, au lieu d'une attente sans issue.
+                setPaymentStatus(null);
+                setDernierEchec(tr("confirmation_attente_longue"));
             }
         };
 
@@ -1294,11 +1309,27 @@ export default function CheckoutPage() {
         );
     }
 
+    if (!transaction && erreurChargement) {
+        return (
+            <Coque theme={checkoutTheme} langue={langue} gauche={
+                <div className="hidden lg:block">
+                    <p className="text-[13px]" style={{ color: checkoutTheme.textMuted }}>{MARQUE}</p>
+                    <p className="mt-2 text-[28px] leading-tight" style={{ color: checkoutTheme.textPrimary }}>{tr("suivi_paiement")}</p>
+                </div>
+            }>
+                <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                    <p className="max-w-[300px] text-[14px] leading-relaxed" style={{ color: checkoutTheme.textPrimary }}>{tr("chargement_impossible")}</p>
+                    <BoutonSecondaire theme={checkoutTheme} onClick={() => { setErreurChargement(false); loadData(); }}>{tr("reessayer")}</BoutonSecondaire>
+                </div>
+            </Coque>
+        );
+    }
+
     if (!transaction) {
         return (
             <Coque theme={checkoutTheme} langue={langue} gauche={
                 <div className="hidden lg:block">
-                    <p className="text-[13px]" style={{ color: checkoutTheme.textMuted }}>Cartflox</p>
+                    <p className="text-[13px]" style={{ color: checkoutTheme.textMuted }}>{MARQUE}</p>
                     <p className="mt-2 text-[28px] leading-tight" style={{ color: checkoutTheme.textPrimary }}>{tr("lien_nulle_part")}</p>
                 </div>
             }>
@@ -1659,7 +1690,7 @@ export default function CheckoutPage() {
                         )}
                         <div>
                             <Etiquette theme={checkoutTheme}>{tr("code_recu")}</Etiquette>
-                            <input value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))} placeholder="000000" autoFocus inputMode="numeric" maxLength={8}
+                            <input value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))} placeholder="000000" autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={8}
                                 className="h-14 w-full rounded-xl text-center text-[24px] font-semibold tracking-[0.35em] outline-none" style={champStyle(checkoutTheme)} />
                         </div>
                         <div className="flex gap-2">
@@ -1785,6 +1816,7 @@ export default function CheckoutPage() {
                         <div className="flex flex-col items-center gap-2">
                             <span className="inline-flex items-center gap-2 text-[12.5px] font-medium" style={{ color: checkoutTheme.accent }}><Loader2 size={13} className="animate-spin" /> {tr("en_attente_confirmation")}</span>
                             <button type="button" onClick={() => setPaymentStatus('verifying')} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("deja_valide")}</button>
+                            <button type="button" onClick={() => setPaymentStatus(null)} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("retour")}</button>
                         </div>
                     </motion.div>
                 )}
@@ -1801,6 +1833,7 @@ export default function CheckoutPage() {
                                 <p className="text-[15px] font-semibold" style={{ color: checkoutTheme.textPrimary }}>{tr("verification_paiement")}</p>
                                 <p className="mt-1 text-[12.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("verification_texte")}</p>
                             </div>
+                            <button type="button" onClick={() => setPaymentStatus(null)} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("retour")}</button>
                         </div>
                     </motion.div>
                 )}

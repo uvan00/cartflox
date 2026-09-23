@@ -95,7 +95,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const meta: any = tx.metadata || {};
     const toutes: [string, string][] = [
         ["Payé par", tx.customerName || "Client"],
-        ["Contact", [tx.customerEmail, tx.customerPhone].filter(Boolean).join("  ·  ")],
+        ["Contact", [tx.customerEmail, tx.customerPhone].filter(Boolean).join(", ")],
         ["Objet", meta.description || ""],
         ["Moyen de paiement", tx.paymentType === "CARD" ? "Carte bancaire" : tx.paymentType === "MOBILE_MONEY" ? "Mobile Money" : String(tx.paymentType || "")],
         ["Traité par", app.paymentMode === "managed" ? "Cartflox" : String(tx.provider || "")],
@@ -126,7 +126,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const bas = doc.page.height - doc.page.margins.bottom - 52;
     doc.moveTo(G, bas).lineTo(D, bas).lineWidth(1).stroke(TRAIT);
     doc.font("Helvetica").fontSize(9).fillColor(GRIS)
-        .text(`Reçu émis par Cartflox${app.name ? ` pour ${app.name}` : ""}${app.website ? `  ·  ${String(app.website).replace(/^https?:\/\//, "")}` : ""}`, G, bas + 14, { width: large, align: "center" })
+        .text(`Reçu émis par Cartflox${app.name ? ` pour ${app.name}` : ""}${app.website ? `, ${String(app.website).replace(/^https?:\/\//, "")}` : ""}`, G, bas + 14, { width: large, align: "center" })
         .text(`Identifiant de la transaction : ${tx.id}`, G, bas + 27, { width: large, align: "center" })
         .text(`Document établi le ${dateLongue(new Date())}`, G, bas + 40, { width: large, align: "center" });
 

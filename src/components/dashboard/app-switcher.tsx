@@ -134,7 +134,7 @@ export function AppSwitcher() {
                 sideOffset={8}
             >
                 <DropdownMenuLabel style={{ padding: "8px 10px 4px", fontSize: 10, fontWeight: 500, color: theme.textDisabled, letterSpacing: 0.5 }}>
-                    Workspaces
+                    Espaces
                 </DropdownMenuLabel>
 
                 <DropdownMenuGroup className="space-y-0.5">

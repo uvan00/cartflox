@@ -348,7 +348,7 @@ export function ConfigurationPasserelle({ fournisseur, passerelle, ongletInitial
                                         <button key={m} type="button" onClick={() => { setMode(m); chargerChamps(m); }}
                                             className="h-8 rounded-md px-3.5 text-xs font-medium transition-colors"
                                             style={mode === m ? { background: m === "test" ? "rgba(245,158,11,0.18)" : "var(--dt-card-bg)", color: m === "test" ? "#f59e0b" : "var(--dt-text-primary)", border: "1px solid var(--dt-border)" } : { color: "var(--dt-text-muted)", border: "1px solid transparent" }}>
-                                            {m === "live" ? "Live" : "Test (sandbox)"}
+                                            {m === "live" ? "Production" : "Test (bac à sable)"}
                                         </button>
                                     ))}
                                 </div>
