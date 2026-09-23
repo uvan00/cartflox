@@ -42,6 +42,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
+    // Le fournisseur de theme de @lobehub/ui ne rend pas la meme chose sur le
+    // serveur et au premier passage client : monte des l'hydratation, il faisait
+    // echouer celle-ci (erreur React 418 sur chaque page, verifie le 23/09/2026).
+    // On le pose donc apres le montage, au prix d'une reconstruction de la page.
     if (!mounted) {
         return <>{children}</>;
     }
