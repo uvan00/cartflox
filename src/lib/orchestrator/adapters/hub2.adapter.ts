@@ -20,6 +20,7 @@ import {
  * - MTN MoMo (CI, BJ, CM, GH)
  * - Moov Money (BJ, TG, CI, BF)
  * - Wave (CI, SN, BF)
+ * - Free Money (SN)
  * - T-Money (TG)
  * 
  * Currency: XOF, XAF, GHS
@@ -100,12 +101,14 @@ const METHOD_MAP: Record<string, { provider: string; country: string }> = {
     'wave-ci-hub2':     { provider: 'wave',   country: 'CI' },
     'orange-sn-hub2':   { provider: 'orange', country: 'SN' },
     'wave-sn-hub2':     { provider: 'wave',   country: 'SN' },
+    'free-sn-hub2':     { provider: 'free',   country: 'SN' },
     'mtn-bj-hub2':      { provider: 'mtn',    country: 'BJ' },
     'moov-bj-hub2':     { provider: 'moov',   country: 'BJ' },
     'orange-ml-hub2':   { provider: 'orange', country: 'ML' },
     'moov-ml-hub2':     { provider: 'moov',   country: 'ML' },
     'orange-bf-hub2':   { provider: 'orange', country: 'BF' },
     'moov-bf-hub2':     { provider: 'moov',   country: 'BF' },
+    'wave-bf-hub2':     { provider: 'wave',   country: 'BF' },
     'tmoney-tg-hub2':   { provider: 'togocom', country: 'TG' },
     'moov-tg-hub2':     { provider: 'moov',   country: 'TG' },
     'mtn-cm-hub2':      { provider: 'mtn',    country: 'CM' },
@@ -403,6 +406,7 @@ export class Hub2Adapter implements IPaymentProvider {
         if (c.includes('mtn'))    return 'mtn';
         if (c.includes('moov'))   return 'moov';
         if (c.includes('wave'))   return 'wave';
+        if (c.includes('free'))   return 'free';
         if (c.includes('tmoney') || c.includes('togocom')) return 'togocom';
         return 'mtn';
     }

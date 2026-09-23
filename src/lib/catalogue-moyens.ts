@@ -281,6 +281,8 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
         // Bénin
         { name: "MTN Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "mtn-bj-feexpay", logo: "/icons/methods/momo.svg" },
         { name: "Moov Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "moov-bj-feexpay", logo: "/icons/methods/moov_money.svg" },
+        { name: "Celtiis Money Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "celtiis-bj-feexpay", logo: "/icons/methods/celtiis_bj.svg" },
+        { name: "Coris Money Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "coris-bj-feexpay", logo: "/icons/methods/coris_money.svg" },
         // Togo
         { name: "T-Money Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "tmoney-tg-feexpay", logo: "/icons/methods/togocel.svg" },
         { name: "Flooz Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "flooz-tg-feexpay", logo: "/icons/methods/moov_money.svg" },
@@ -376,12 +378,14 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
         { name: "Wave CI", country: "Côte d'Ivoire", flag: "CI", type: "MOBILE_MONEY", code: "wave-ci-hub2", logo: "/icons/methods/wave.svg" },
         { name: "Orange Money Sénégal", country: "Sénégal", flag: "SN", type: "MOBILE_MONEY", code: "orange-sn-hub2", logo: "/icons/methods/orange_money.svg" },
         { name: "Wave Sénégal", country: "Sénégal", flag: "SN", type: "MOBILE_MONEY", code: "wave-sn-hub2", logo: "/icons/methods/wave.svg" },
+        { name: "Free Money Sénégal", country: "Sénégal", flag: "SN", type: "MOBILE_MONEY", code: "free-sn-hub2", logo: "/icons/methods/freemoney_sn.svg" },
         { name: "MTN Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "mtn-bj-hub2", logo: "/icons/methods/momo.svg" },
         { name: "Moov Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "moov-bj-hub2", logo: "/icons/methods/moov_money.svg" },
         { name: "Orange Money Mali", country: "Mali", flag: "ML", type: "MOBILE_MONEY", code: "orange-ml-hub2", logo: "/icons/methods/orange_money.svg" },
         { name: "Moov Mali", country: "Mali", flag: "ML", type: "MOBILE_MONEY", code: "moov-ml-hub2", logo: "/icons/methods/moov_money.svg" },
         { name: "Orange Money Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "orange-bf-hub2", logo: "/icons/methods/orange_money.svg" },
         { name: "Moov Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "moov-bf-hub2", logo: "/icons/methods/moov_money.svg" },
+        { name: "Wave Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "wave-bf-hub2", logo: "/icons/methods/wave.svg" },
         { name: "T-Money Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "tmoney-tg-hub2", logo: "/icons/methods/togocel.svg" },
         { name: "Moov Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "moov-tg-hub2", logo: "/icons/methods/moov_money.svg" },
         { name: "MTN Cameroun", country: "Cameroun", flag: "CM", type: "MOBILE_MONEY", code: "mtn-cm-hub2", logo: "/icons/methods/momo.svg" },
