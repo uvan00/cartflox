@@ -1,4 +1,3 @@
-import { kkiapay } from '@kkiapay-org/nodejs-sdk';
 import {
     IPaymentProvider,
     PaymentRequest,
@@ -29,20 +28,40 @@ interface KkiapayConfig {
     mode?: 'test' | 'live';
 }
 
+const API_KKIAPAY = { sandbox: 'https://api-sandbox.kkiapay.me', live: 'https://api.kkiapay.me' };
+const DELAI_KKIAPAY_MS = 15_000;
+
+/**
+ * Ce que faisait le SDK @kkiapay-org/nodejs-sdk, en fetch : un POST JSON
+ * authentifie par trois en-tetes. Le SDK tirait axios (versions vulnerables)
+ * pour ce seul appel, et testait le code 4003 de Kkiapay contre le statut
+ * HTTP : toute erreur devenait « Transaction Not Found ».
+ */
+async function appelKkiapay(config: KkiapayConfig, chemin: string, corps: unknown): Promise<{ http: number; donnees: any }> {
+    const base = config.mode === 'live' ? API_KKIAPAY.live : API_KKIAPAY.sandbox;
+    const r = await fetch(`${base}${chemin}`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            'x-api-key': config.publicKey || '',
+            'x-secret-key': config.secret || '',
+            'x-private-key': config.privateKey || '',
+        },
+        body: JSON.stringify(corps),
+        signal: AbortSignal.timeout(DELAI_KKIAPAY_MS),
+    });
+    const texte = await r.text();
+    let donnees: any = null;
+    try { donnees = texte ? JSON.parse(texte) : null; } catch { donnees = { brut: texte.slice(0, 300) }; }
+    return { http: r.status, donnees };
+}
+
 export class KkiapayAdapter implements IPaymentProvider {
     readonly name = 'Kkiapay';
-    private kkiapayInstance: any;
     private config: KkiapayConfig;
 
     constructor(config: KkiapayConfig) {
         this.config = config;
-        // Kkiapay SDK expects an object { publickey, privatekey, secretkey, sandbox }
-        this.kkiapayInstance = kkiapay({
-            publickey: config.publicKey,
-            privatekey: config.privateKey,
-            secretkey: config.secret,
-            sandbox: config.mode !== 'live'
-        });
     }
 
 
@@ -104,18 +123,27 @@ export class KkiapayAdapter implements IPaymentProvider {
     }
 
     /**
-     * Verify payment status using Kkiapay SDK
+     * Statut d'une transaction chez Kkiapay. Une erreur d'appel revient en
+     * rawData.error : applyVerificationResult l'ignore, elle ne fait jamais
+     * passer un paiement en echec.
      */
     async verifyPayment(providerReference: string): Promise<PaymentResponse> {
+        const erreur = (message: string): PaymentResponse => ({
+            transactionId: providerReference,
+            providerReference,
+            status: 'FAILED' as PaymentStatus,
+            rawData: { error: message },
+        });
+        if (!providerReference) return erreur('Référence Kkiapay manquante');
         try {
-            // providerReference should be the Kkiapay transaction ID returned after payment
-            const response = await this.kkiapayInstance.verify(providerReference);
-
+            // providerReference : l'identifiant de transaction Kkiapay rendu apres paiement.
+            const { http, donnees } = await appelKkiapay(this.config, '/api/v1/transactions/status', { transactionId: providerReference });
+            if (http < 200 || http >= 300) return erreur(donnees?.reason ? String(donnees.reason) : `Kkiapay HTTP ${http}`);
 
             let status: PaymentStatus = 'PENDING';
-            if (response.status === 'SUCCESS') {
+            if (donnees?.status === 'SUCCESS') {
                 status = 'SUCCESS';
-            } else if (response.status === 'FAILED') {
+            } else if (donnees?.status === 'FAILED') {
                 status = 'FAILED';
             }
 
@@ -123,15 +151,10 @@ export class KkiapayAdapter implements IPaymentProvider {
                 transactionId: providerReference,
                 providerReference,
                 status,
-                rawData: response,
+                rawData: donnees,
             };
         } catch (error: any) {
-            return {
-                transactionId: providerReference,
-                providerReference,
-                status: 'FAILED' as PaymentStatus,
-                rawData: { error: error.message },
-            };
+            return erreur(error?.name === 'TimeoutError' ? 'Kkiapay injoignable (délai dépassé)' : (error?.message || 'Kkiapay injoignable'));
         }
     }
 
@@ -181,21 +204,19 @@ export class KkiapayAdapter implements IPaymentProvider {
                 return { success: false, message: 'Public Key and Private Key are required' };
             }
 
-            // The SDK doesn't have a direct "ping" method. 
-            // We'll perform a dummy verify to check if keys are accepted.
-            const response = await this.kkiapayInstance.verify('fake_id').catch((e: any) => e);
-
-
-            // If the error is 401/Invalid Key, we know it's bad.
-            // But usually, Kkiapay returns useful error messages.
-            if (response && response.status === 'INVALID_TRANSACTION') {
-                // This means the API key is valid but transaction ID is not
-                return { success: true };
+            // Pas d'appel « ping » chez Kkiapay : on demande le statut d'une
+            // transaction qui n'existe pas. Des cles refusees repondent HTTP 401
+            // (code 4003 « Invalid API KEY », constate le 23/09/2026) ; des cles
+            // acceptees repondent autre chose, la transaction etant inconnue.
+            // Avant, le SDK avalait l'erreur et toute cle passait pour valide.
+            const { http, donnees } = await appelKkiapay(this.config, '/api/v1/transactions/status', { transactionId: 'cartflox-verification-cles' });
+            if (http === 401 || http === 403) {
+                const mode = this.config.mode === 'live' ? 'production' : 'test (sandbox)';
+                return { success: false, message: `Kkiapay refuse ces clés en mode ${mode}${donnees?.reason ? ` : ${donnees.reason}` : ''}.` };
             }
-
             return { success: true };
         } catch (error: any) {
-            return { success: false, message: 'Erreur lors de la validation Kkiapay' };
+            return { success: false, message: 'Kkiapay injoignable, réessayez dans un instant.' };
         }
     }
 }
