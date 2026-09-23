@@ -2,8 +2,14 @@
 
 import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { devisePrincipale, parDevise, parDeviseGroupe, type MontantDevise } from "@/lib/devises";
 import { getSelectedAppId } from "./utils";
 
+/**
+ * Les chiffres de la vue d'ensemble. Le volume se compte DANS CHAQUE DEVISE :
+ * un `_sum` global additionnait des francs, des dollars et des francs
+ * congolais puis l'affichait en XOF.
+ */
 export async function getDashboardStats() {
     try {
         const session = await getSession();
@@ -12,37 +18,25 @@ export async function getDashboardStats() {
         const appId = await getSelectedAppId();
         if (!appId) return null;
 
-        // Get total volume from successful payments
-        const totalVolume = await prisma.transaction.aggregate({
-            where: { applicationId: appId, status: 'SUCCESS' },
-            _sum: { amount: true }
-        });
+        const [reussis, totalTxCount, activeGateways, totalGateways] = await Promise.all([
+            prisma.transaction.groupBy({
+                by: ["currency"],
+                where: { applicationId: appId, status: "SUCCESS" },
+                _sum: { amount: true },
+                _count: { _all: true },
+            }),
+            prisma.transaction.count({ where: { applicationId: appId } }),
+            prisma.gateway.count({ where: { applicationId: appId, status: "active" } }),
+            prisma.gateway.count({ where: { applicationId: appId } }),
+        ]);
 
-        // Get total successful transactions count
-        const successfulTxCount = await prisma.transaction.count({
-            where: { applicationId: appId, status: 'SUCCESS' }
-        });
-
-        // Get total transactions count for conversion rate
-        const totalTxCount = await prisma.transaction.count({
-            where: { applicationId: appId }
-        });
-
-        // Get active gateways count
-        const activeGateways = await prisma.gateway.count({
-            where: { applicationId: appId, status: 'active' }
-        });
-
-        const totalGateways = await prisma.gateway.count({
-            where: { applicationId: appId }
-        });
-
+        const successfulTxCount = reussis.reduce((n, l) => n + (l._count?._all || 0), 0);
         const conversionRate = totalTxCount > 0
             ? ((successfulTxCount / totalTxCount) * 100).toFixed(1)
             : "0.0";
 
         return {
-            totalVolume: totalVolume._sum.amount || 0,
+            volumes: parDeviseGroupe(reussis),
             successfulTxCount,
             conversionRate,
             activeGateways,
@@ -76,67 +70,25 @@ export async function getRecentTransactions(limit = 5) {
     }
 }
 
-export async function getWeeklyVolume() {
-    try {
-        const session = await getSession();
-        if (!session?.user) return [];
-
-        const appId = await getSelectedAppId();
-        if (!appId) return [];
-
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const today = new Date();
-        const startOfWeek = new Date(today);
-        startOfWeek.setDate(today.getDate() - today.getDay());
-        startOfWeek.setHours(0, 0, 0, 0);
-
-        const volumeData = await Promise.all(days.map(async (day, index) => {
-            const dayStart = new Date(startOfWeek);
-            dayStart.setDate(startOfWeek.getDate() + index);
-
-            const dayEnd = new Date(dayStart);
-            dayEnd.setHours(23, 59, 59, 999);
-
-            const dayVolume = await prisma.transaction.aggregate({
-                where: {
-                    applicationId: appId,
-                    status: 'SUCCESS',
-                    createdAt: {
-                        gte: dayStart,
-                        lte: dayEnd
-                    }
-                },
-                _sum: { amount: true }
-            });
-
-            return {
-                name: day,
-                total: dayVolume._sum.amount || 0
-            };
-        }));
-
-        return volumeData;
-    } catch (error) {
-        console.error("Error fetching weekly volume:", error);
-        return [];
-    }
-}
-
-
 /**
  * Montant encaisse par jour, separe en Mobile Money et carte bancaire : les
  * deux aires du graphique de la vue d'ensemble s'empilent donc sur le total
- * encaisse. Une seule requete groupee, la ou l'ancienne version en faisait
- * une par jour.
+ * encaisse. Une seule requete groupee.
+ *
+ * La courbe ne trace qu'UNE devise, la plus frequente sur la periode : empiler
+ * des francs et des dollars ne veut rien dire. Les autres devises reviennent a
+ * part, en total, pour que rien ne disparaisse.
  */
 export type PointVolume = { date: string; mobile: number; carte: number; paiements: number };
+export type SerieVolume = { devise: string; points: PointVolume[]; autres: MontantDevise[] };
 
-export async function getVolumeSerie(jours: number): Promise<PointVolume[]> {
+export async function getVolumeSerie(jours: number): Promise<SerieVolume> {
+    const vide: SerieVolume = { devise: "XOF", points: [], autres: [] };
     try {
         const session = await getSession();
-        if (!session?.user) return [];
+        if (!session?.user) return vide;
         const appId = await getSelectedAppId();
-        if (!appId) return [];
+        if (!appId) return vide;
 
         const n = [7, 30, 90].includes(jours) ? jours : 30;
         const debut = new Date();
@@ -145,8 +97,10 @@ export async function getVolumeSerie(jours: number): Promise<PointVolume[]> {
 
         const lignes = await prisma.transaction.findMany({
             where: { applicationId: appId, status: "SUCCESS", createdAt: { gte: debut } },
-            select: { createdAt: true, amount: true, paymentType: true },
+            select: { createdAt: true, amount: true, paymentType: true, currency: true },
         });
+        const totaux = parDevise(lignes);
+        const devise = devisePrincipale(totaux);
 
         // Un point par jour, meme sans paiement : sinon la courbe saute les trous.
         const par = new Map<string, PointVolume>();
@@ -157,6 +111,7 @@ export async function getVolumeSerie(jours: number): Promise<PointVolume[]> {
             par.set(cle, { date: cle, mobile: 0, carte: 0, paiements: 0 });
         }
         for (const l of lignes) {
+            if (String(l.currency || "XOF").toUpperCase() !== devise) continue;
             const cle = new Date(l.createdAt).toISOString().slice(0, 10);
             const p = par.get(cle);
             if (!p) continue;
@@ -164,9 +119,9 @@ export async function getVolumeSerie(jours: number): Promise<PointVolume[]> {
             if (l.paymentType === "CARD") p.carte += montant; else p.mobile += montant;
             p.paiements += 1;
         }
-        return [...par.values()];
+        return { devise, points: [...par.values()], autres: totaux.filter((t) => t.devise !== devise) };
     } catch (e) {
         console.error("[dashboard] serie de volume indisponible", e);
-        return [];
+        return vide;
     }
 }

@@ -6,12 +6,14 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/coque/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/coque/ui/dropdown-menu";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { getVolumeSerie, type PointVolume } from "@/lib/actions/dashboard";
+import { getVolumeSerie, type SerieVolume } from "@/lib/actions/dashboard";
+import { formaterMontant, listeMontants } from "@/lib/devises";
 
 /**
  * Ce qui est entre, jour par jour, en aires empilees : Mobile Money et carte
  * bancaire se cumulent donc sur le total encaisse. Trois periodes, comme sur
- * les tableaux de bord de paiement.
+ * les tableaux de bord de paiement. Une seule devise sur la courbe, la plus
+ * frequente ; les autres sont citees sous le titre, jamais additionnees.
  */
 const PERIODES = [
     { jours: 90, label: "3 derniers mois" },
@@ -24,20 +26,24 @@ const config = {
     carte: { label: "Carte bancaire", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
-const montant = (v: number) => `${new Intl.NumberFormat("fr-FR").format(Math.round(v))} F`;
 const jourCourt = (v: string) => new Date(v).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 const jourLong = (v: string) => new Date(v).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
 export function OverviewChart() {
     const [jours, setJours] = useState<number>(30);
-    const [points, setPoints] = useState<PointVolume[] | null>(null);
+    const [serie, setSerie] = useState<SerieVolume | null>(null);
 
     useEffect(() => {
         let vivant = true;
-        setPoints(null);
-        getVolumeSerie(jours).then((d) => { if (vivant) setPoints(d); }).catch(() => { if (vivant) setPoints([]); });
+        setSerie(null);
+        getVolumeSerie(jours).then((d) => { if (vivant) setSerie(d); }).catch(() => { if (vivant) setSerie({ devise: "XOF", points: [], autres: [] }); });
         return () => { vivant = false; };
     }, [jours]);
+
+    const points = serie ? serie.points : null;
+    const devise = serie?.devise || "XOF";
+    const montant = (v: number) => formaterMontant(v, devise);
+    const autres = serie?.autres || [];
 
     const periode = PERIODES.find((p) => p.jours === jours) || PERIODES[1];
     const total = useMemo(() => (points || []).reduce((s, p) => s + p.mobile + p.carte, 0), [points]);
@@ -50,7 +56,7 @@ export function OverviewChart() {
                     <CardTitle>Ce qui est entré</CardTitle>
                     <CardDescription>
                         {points === null ? "Chargement…"
-                            : total > 0 ? `${montant(total)} sur ${paiements} paiement${paiements > 1 ? "s" : ""}, ${periode.label.toLowerCase()}.`
+                            : total > 0 ? `${montant(total)} sur ${paiements} paiement${paiements > 1 ? "s" : ""}, ${periode.label.toLowerCase()}.${autres.length ? ` Également reçu : ${listeMontants(autres)}, hors courbe.` : ""}`
                                 : `Aucun paiement reçu sur ${periode.label.toLowerCase()}.`}
                     </CardDescription>
                 </div>

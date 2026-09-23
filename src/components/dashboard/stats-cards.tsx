@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { Wallet, CheckCircle2, Percent, Plug } from "lucide-react";
 import { getDashboardStats } from "@/lib/actions/dashboard";
-import { fmtMontant } from "./kit";
+import { Montants } from "./kit";
 
 /**
  * Quatre chiffres vrais, sans comparaison inventee : ce que le marchand a
- * encaisse, combien de paiements ont abouti, a quel taux, avec quoi.
+ * encaisse (une ligne par devise, jamais additionnees), combien de paiements
+ * ont abouti, a quel taux, avec quoi.
  */
 export function StatsCards() {
     const [s, setS] = useState<any>(null);
@@ -17,7 +18,7 @@ export function StatsCards() {
 
     const total = s?.totalTxCount || 0;
     const cartes = [
-        { label: "Volume encaissé", valeur: s ? fmtMontant(s.totalVolume) : "0 XOF", sous: "paiements réussis, depuis le début", Icone: Wallet, couleur: "#12a594" },
+        { label: "Volume encaissé", valeur: <Montants valeurs={s?.volumes} />, sous: (s?.volumes?.length || 0) > 1 ? "paiements réussis, depuis le début, par devise" : "paiements réussis, depuis le début", Icone: Wallet, couleur: "#12a594" },
         { label: "Paiements réussis", valeur: s ? String(s.successfulTxCount || 0) : "0", sous: total > 0 ? `sur ${total} tentative${total > 1 ? "s" : ""}` : "aucune tentative encore", Icone: CheckCircle2, couleur: "#60a5fa" },
         { label: "Taux de réussite", valeur: s ? `${s.conversionRate || "0.0"} %` : "0 %", sous: total > 0 ? "réussis sur tentés" : "en attente de vos premiers paiements", Icone: Percent, couleur: "#a78bfa" },
         { label: "Passerelles actives", valeur: s ? `${s.activeGateways || 0} / ${s.totalGateways || 0}` : "0 / 0", sous: !s?.totalGateways ? "aucune connectée" : s.activeGateways < s.totalGateways ? `${s.totalGateways - s.activeGateways} en pause` : "toutes en service", Icone: Plug, couleur: "#f59e0b" },

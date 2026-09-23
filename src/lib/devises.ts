@@ -71,6 +71,33 @@ export function parDevise(lignes: { currency?: string | null; amount: number }[]
         .sort((a, b) => b.nombre - a.nombre || b.montant - a.montant);
 }
 
+/**
+ * La meme regle pour un `groupBy` Prisma par devise : une entree par devise
+ * (en majuscules, « xof » et « XOF » fusionnent), la plus frequente en premier,
+ * chaque total arrondi a la precision de sa devise.
+ */
+export function parDeviseGroupe(lignes: { currency?: string | null; _sum?: { amount?: number | null } | null; _count?: { _all?: number } | null }[]): MontantDevise[] {
+    const m = new Map<string, MontantDevise>();
+    for (const l of lignes) {
+        const devise = String(l.currency || "XOF").toUpperCase();
+        const e = m.get(devise) || { devise, montant: 0, nombre: 0 };
+        e.montant += Number(l._sum?.amount) || 0;
+        e.nombre += Number(l._count?._all) || 0;
+        m.set(devise, e);
+    }
+    return [...m.values()]
+        .map((e) => ({ ...e, montant: arrondirMontant(e.montant, e.devise) }))
+        .filter((v) => v.montant !== 0)
+        .sort((a, b) => b.nombre - a.nombre || b.montant - a.montant);
+}
+
+/** « 40 000 XOF et 2,00 USD » : une liste lisible, jamais une somme. */
+export function listeMontants(lot?: { devise: string; montant: number }[] | null): string {
+    const l = (lot || []).filter((v) => v && v.montant !== 0).map((v) => formaterMontant(v.montant, v.devise));
+    if (l.length === 0) return formaterMontant(0, "XOF");
+    return l.length === 1 ? l[0] : `${l.slice(0, -1).join(", ")} et ${l[l.length - 1]}`;
+}
+
 /** La devise principale d'un lot (la plus frequente). XOF si le lot est vide. */
 export const devisePrincipale = (lot?: MontantDevise[] | null) => lot?.[0]?.devise || "XOF";
 
