@@ -36,6 +36,7 @@ import {
     Hash,
     Banknote,
     MessageCircle,
+    Link2,
 } from "lucide-react";
 import {
     Dialog,
@@ -311,7 +312,7 @@ export default function TransactionDetailsPage() {
 
     const isMobile = (transaction.paymentType || '').toLowerCase().includes('mobile');
     const metadata = (transaction.metadata as Record<string, any>) || {};
-    const metadataEntries = Object.entries(metadata).filter(([k]) => !['gatewayId', 'methodCode'].includes(k));
+    const metadataEntries = Object.entries(metadata).filter(([k]) => !['gatewayId', 'methodCode', 'paymentLinkId'].includes(k));
     const hasFees = transaction.platformFee != null && transaction.merchantAmount != null;
     const country = phoneCountry(transaction.customerPhone);
     const methodLabel = (metadata.methodCode || transaction.paymentType || '')
@@ -394,6 +395,17 @@ export default function TransactionDetailsPage() {
                                 <span>Commande</span>
                                 <CopyChip text={transaction.orderId} label="orderId" />
                             </div>
+                            {transaction.lien && (
+                                <div className="flex items-center gap-1.5 text-xs flex-wrap" style={{ color: 'var(--dt-text-muted)' }}>
+                                    <Link2 size={12} />
+                                    <span>Lien de paiement</span>
+                                    {transaction.lien.titre ? (
+                                        <Link href={`/payment-links/${transaction.lien.id}`} className="font-medium hover:underline" style={{ color: 'var(--dt-text-primary)' }}>{transaction.lien.titre}</Link>
+                                    ) : (
+                                        <span>supprimé depuis</span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div className="text-left sm:text-right shrink-0">
                             <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--dt-text-muted)' }}>Montant</p>
@@ -724,7 +736,7 @@ export default function TransactionDetailsPage() {
                                 {[
                                     ["Payé par", transaction.customerName || "Client"],
                                     ["Contact", [transaction.customerEmail, transaction.customerPhone].filter(Boolean).join(", ")],
-                                    ["Objet", (transaction.metadata as any)?.description || null],
+                                    ["Objet", (transaction.metadata as any)?.description || transaction.lien?.titre || null],
                                     ["Moyen de paiement", transaction.paymentType === "CARD" ? "Carte bancaire" : transaction.paymentType === "MOBILE_MONEY" ? "Mobile Money" : transaction.paymentType || null],
                                     ["Traité par", transaction.provider || null],
                                     ["Référence", transaction.orderId],

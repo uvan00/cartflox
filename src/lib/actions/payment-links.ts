@@ -8,6 +8,8 @@ import { getSelectedAppId } from "./utils";
 import { arrondirMontant, formaterMontant } from "@/lib/devises";
 import { rateLimit } from "@/lib/rate-limit";
 import { ipCourante } from "@/lib/ip-courante";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
+import { getCountryByCode } from "@/lib/countries";
 
 /**
  * Hote qui SERT les pages /pay : `LIENS_PUBLIC_URL` s'il est pose (un domaine
@@ -369,5 +371,99 @@ export async function initializePaymentLinkTransaction(data: {
     } catch (error: any) {
         console.error("Failed to initialize transaction:", error);
         return { success: false, error: error.message || "Erreur d'initialisation" };
+    }
+}
+
+/** Le pays d'un numero, d'apres son indicatif : code ISO et nom francais. */
+function paysDuNumero(tel?: string | null): { code: string; nom: string } | null {
+    const brut = String(tel || "").trim();
+    if (!brut) return null;
+    try {
+        const p = parsePhoneNumberFromString(brut.startsWith("+") ? brut : `+${brut.replace(/\D/g, "")}`);
+        if (!p?.country) return null;
+        return { code: p.country, nom: getCountryByCode(p.country)?.name || p.country };
+    } catch {
+        return null;
+    }
+}
+
+export type ClientDuLien = {
+    nom: string;
+    email: string;
+    telephone: string | null;
+    pays: { code: string; nom: string } | null;
+    paiements: number;
+    reussis: number;
+    total: number;
+    devise: string;
+    premier: Date;
+    dernier: Date;
+    aPaye: boolean;
+    /** Ses derniers paiements sur ce lien, le plus recent d'abord (au plus 5). */
+    derniers: { id: string; amount: number; currency: string; status: string; createdAt: Date; quantite: number }[];
+};
+
+/**
+ * Un lien et tout ce qu'il a produit : ses chiffres et ses clients (une
+ * personne = une adresse e-mail, comme dans le repertoire). Les paiements
+ * eux-memes se lisent page par page avec `getTransactions({ paymentLinkId })`.
+ * Chaque paiement porte l'identifiant de son lien dans ses metadonnees.
+ */
+export async function getPaymentLinkDetail(id: string) {
+    try {
+        const session = await getSession();
+        if (!session?.user) return null;
+        const appId = await getSelectedAppId();
+        if (!appId) return null;
+        const brut = await prisma.paymentLink.findFirst({ where: { id, applicationId: appId } });
+        if (!brut) return null;
+
+        const txs = await prisma.transaction.findMany({
+            where: { applicationId: appId, metadata: { path: ["paymentLinkId"], equals: id } } as any,
+            select: { id: true, amount: true, currency: true, status: true, createdAt: true, customerName: true, customerEmail: true, customerPhone: true, metadata: true },
+            orderBy: { createdAt: "desc" },
+        });
+
+        const stats = { paiements: txs.length, reussis: 0, enAttente: 0, echoues: 0, rembourses: 0, encaisse: 0, quantite: 0, dernier: null as Date | null, dernierReussi: null as Date | null, premier: null as Date | null };
+        const parEmail = new Map<string, ClientDuLien>();
+        for (const t of txs) {
+            const quantite = Math.max(1, Math.round(Number((t.metadata as any)?.quantity) || 1));
+            if (t.status === "SUCCESS") { stats.reussis += 1; stats.encaisse += t.amount; stats.quantite += quantite; if (!stats.dernierReussi) stats.dernierReussi = t.createdAt; }
+            else if (t.status === "PENDING") stats.enAttente += 1;
+            else if (t.status === "REFUNDED") stats.rembourses += 1;
+            else stats.echoues += 1;
+            if (!stats.dernier) stats.dernier = t.createdAt;
+            stats.premier = t.createdAt;
+
+            const email = String(t.customerEmail || "").trim().toLowerCase();
+            const cle = email || `tel:${t.customerPhone || ""}` || t.id;
+            const c = parEmail.get(cle) || (parEmail.set(cle, {
+                nom: t.customerName || "Client", email, telephone: t.customerPhone || null, pays: paysDuNumero(t.customerPhone),
+                paiements: 0, reussis: 0, total: 0, devise: t.currency, premier: t.createdAt, dernier: t.createdAt, aPaye: false, derniers: [],
+            }).get(cle) as ClientDuLien);
+            c.paiements += 1;
+            if (t.status === "SUCCESS") { c.reussis += 1; c.total += t.amount; c.aPaye = true; }
+            if (t.createdAt < c.premier) c.premier = t.createdAt;
+            if (t.createdAt > c.dernier) { c.dernier = t.createdAt; c.nom = t.customerName || c.nom; }
+            if (!c.telephone && t.customerPhone) { c.telephone = t.customerPhone; c.pays = paysDuNumero(t.customerPhone); }
+            if (c.derniers.length < 5) c.derniers.push({ id: t.id, amount: t.amount, currency: t.currency, status: t.status, createdAt: t.createdAt, quantite });
+        }
+        const clients = [...parEmail.values()].sort((a, b) => b.dernier.getTime() - a.dernier.getTime());
+
+        const maintenant = new Date();
+        const { images, ...l } = brut as any;
+        return {
+            lien: {
+                ...l,
+                images: imagesValides(images),
+                statut: l.status === "active" && l.expiresAt && l.expiresAt < maintenant ? "expired" : l.status,
+                url: `${SITE}/pay/${l.slug}`,
+            },
+            stats: { ...stats, clients: clients.length, clientsPayeurs: clients.filter((c) => c.aPaye).length, taux: txs.length > 0 ? Math.round((stats.reussis / txs.length) * 100) : 0 },
+            clients,
+        };
+    } catch (error) {
+        console.error("Failed to fetch payment link detail:", error);
+        return null;
     }
 }

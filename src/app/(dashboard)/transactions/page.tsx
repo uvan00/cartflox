@@ -6,6 +6,7 @@ import { Tooltip } from "antd";
 import { BarreFiltres, bornes, DATES_TOUTES, type Dates } from "@/components/dashboard/barre-filtres";
 import CustomerAvatar from "@/components/dashboard/customer-avatar";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
     Calendar,
     ChevronRight,
@@ -25,7 +26,8 @@ import {
     RotateCcw,
     Loader2,
     Bell,
-    BellOff
+    BellOff,
+    Link2
 } from "lucide-react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getTransactions, getTransactionStats, syncAllPendingTransactions } from "@/lib/actions/transactions";
@@ -555,6 +557,14 @@ export default function TransactionsPage() {
                                                         <Copy className="h-3.5 w-3.5" />
                                                     </button>
                                                 </div>
+                                                {/* Paiement recu par un lien de paiement : on dit lequel. */}
+                                                {tx.lien && (tx.lien.titre ? (
+                                                    <Link href={`/payment-links/${tx.lien.id}`} className="mt-0.5 flex items-center gap-1 text-[11px] hover:underline" style={{ color: 'var(--dt-text-muted)' }} title="Voir ce lien de paiement">
+                                                        <Link2 className="h-3 w-3 shrink-0" /><span className="max-w-[180px] truncate">{tx.lien.titre}</span>
+                                                    </Link>
+                                                ) : (
+                                                    <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: 'var(--dt-text-muted)' }}><Link2 className="h-3 w-3 shrink-0" />Lien de paiement supprimé</span>
+                                                ))}
                                             </td>
                                             {/* Date */}
                                             <td className="py-3.5 text-xs whitespace-nowrap" style={{ color: 'var(--dt-text-muted)' }}>{tx.date}</td>

@@ -156,6 +156,10 @@ export async function getTransactionById(id: string) {
             where: { id, ...(await perimetreTransactions(appId)).where }
         });
         if (!transaction) return null;
+        // Le lien de paiement d'origine, s'il y en a un et s'il existe encore.
+        const idLien = (transaction.metadata as any)?.paymentLinkId as string | undefined;
+        const lienBrut = idLien ? await prisma.paymentLink.findUnique({ where: { id: idLien }, select: { title: true, slug: true } }) : null;
+        const lien = idLien ? { id: idLien, titre: lienBrut?.title || null, slug: lienBrut?.slug || null, supprime: !lienBrut } : null;
         // Le nom du commerce figure sur le recu remis au client : on le joint ici.
         const app = (await (prisma as any).application.findUnique({
             where: { id: appId },
@@ -163,9 +167,9 @@ export async function getTransactionById(id: string) {
         }));
         const marchand = { id: app?.id || appId, nom: app?.name || "" };
         if (app?.paymentMode === "managed") {
-            return { ...transaction, provider: "Cartflox", marchand } as any;
+            return { ...transaction, provider: "Cartflox", marchand, lien } as any;
         }
-        return { ...transaction, marchand } as any;
+        return { ...transaction, marchand, lien } as any;
     } catch (error) {
         console.error("Error fetching transaction:", error);
         return null;
@@ -386,6 +390,8 @@ export async function getTransactions(params: {
     status?: string;
     from?: string; // ISO date — filtre createdAt >=
     to?: string;   // ISO date — filtre createdAt <=
+    /** Ne garder que les paiements recus par CE lien de paiement. */
+    paymentLinkId?: string;
 }) {
     try {
         const session = await getSession();
@@ -394,7 +400,7 @@ export async function getTransactions(params: {
         const appId = await getSelectedAppId();
         if (!appId) throw new Error("No application selected");
 
-        const { page = 1, pageSize = 10, search, status, from, to } = params;
+        const { page = 1, pageSize = 10, search, status, from, to, paymentLinkId } = params;
         const skip = (page - 1) * pageSize;
 
         // Espace plateforme (Connect d'un administrateur) : tous les paiements Connect, avec le marchand.
@@ -409,6 +415,11 @@ export async function getTransactions(params: {
             where.createdAt = {};
             if (from) where.createdAt.gte = new Date(from);
             if (to) where.createdAt.lte = new Date(to);
+        }
+
+        // Les paiements d'un lien : l'identifiant du lien vit dans les metadonnees.
+        if (paymentLinkId) {
+            where.metadata = { path: ['paymentLinkId'], equals: paymentLinkId };
         }
 
         if (search) {
@@ -438,6 +449,13 @@ export async function getTransactions(params: {
             prisma.transaction.count({ where }),
             prisma.gateway.findMany({ where: { applicationId: appId }, select: { name: true, config: true, logo: true, apiKey: true, apiSecret: true } })
         ]);
+        // Le lien de paiement d'origine, par son titre. Un lien supprime garde
+        // son identifiant dans le paiement : il est alors presente comme tel.
+        const idsLiens = [...new Set(transactions.map((t: any) => (t.metadata as any)?.paymentLinkId).filter(Boolean))] as string[];
+        const titresLiens: Record<string, string> = {};
+        if (idsLiens.length > 0) {
+            for (const l of await prisma.paymentLink.findMany({ where: { id: { in: idsLiens } }, select: { id: true, title: true } })) titresLiens[l.id] = l.title;
+        }
         // Build a map: gateway name (lowercase) → real provider type
         // Detected from config keys since no explicit type field exists
         const gatewayProviderMap: Record<string, string> = {};
@@ -657,9 +675,12 @@ export async function getTransactions(params: {
                 const operator = detectOperator(tx.customerPhone || '', realProvider, metaMethodCode, tx.metadata);
                 const gatewayDisplay = managedApp ? "Cartflox" : getGatewayDisplay(realProvider);
                 const methodLogo = METHOD_CODE_TO_LOGO[metaMethodCode] || null;
+                const idLien = (tx.metadata as any)?.paymentLinkId as string | undefined;
 
                 return {
                     id: tx.id,
+                    // Lien de paiement d'origine : titre null = lien supprime depuis.
+                    lien: idLien ? { id: idLien, titre: titresLiens[idLien] || null } : null,
                     marchand: perimetre.plateforme ? (tx.application?.name || null) : null,
                     customer: tx.customerName,
                     email: tx.customerEmail,

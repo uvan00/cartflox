@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Dropdown, Modal } from "antd";
-import { Plus, Link2, Copy, Check, QrCode, ExternalLink, MoreHorizontal, Download, PauseCircle, PlayCircle, Trash2 } from "lucide-react";
+import { Plus, Link2, Copy, Check, QrCode, ExternalLink, MoreHorizontal, Download, PauseCircle, PlayCircle, Trash2, Eye, ChevronRight } from "lucide-react";
 import { goeyToast } from "goey-toast";
 import { getPaymentLinksAvecStats, setPaymentLinkStatus, deletePaymentLink, qrPaymentLink } from "@/lib/actions/payment-links";
 import { Page, Bouton, Pastille, Vide, Squelette, fmtMontant } from "@/components/dashboard/kit";
@@ -101,7 +101,7 @@ export default function LiensDePaiementPage() {
                                 <div className="flex min-w-0 gap-3">
                                     {l.vignette && <img src={l.vignette} alt="" className="h-11 w-11 shrink-0 rounded-lg object-cover" style={{ border: "1px solid var(--dt-border)" }} />}
                                     <div className="min-w-0">
-                                        <h3 className="truncate text-[15px] font-semibold" style={{ color: "var(--dt-text-primary)" }}>{l.title}</h3>
+                                        <h3 className="truncate text-[15px] font-semibold" style={{ color: "var(--dt-text-primary)" }}><Link href={`/payment-links/${l.id}`} className="hover:underline">{l.title}</Link></h3>
                                         <p className="line-clamp-2 text-xs leading-relaxed" style={{ color: "var(--dt-text-muted)" }}>{l.description || "Sans description"}</p>
                                     </div>
                                 </div>
@@ -112,9 +112,11 @@ export default function LiensDePaiementPage() {
                             <p className="text-2xl font-semibold tabular-nums tracking-tight" style={{ color: "var(--dt-text-primary)" }}>
                                 {l.amountFree ? <span className="text-lg font-medium">Montant libre</span> : fmtMontant(l.amount, l.currency)}
                             </p>
-                            <p className="mt-1 text-xs" style={{ color: "var(--dt-text-muted)" }}>
+                            {/* Chaque lien a sa page : ses paiements un par un, et ses clients. */}
+                            <Link href={`/payment-links/${l.id}`} className="mt-1 inline-flex items-center gap-1 text-xs hover:underline" style={{ color: l.paiements === 0 ? "var(--dt-text-muted)" : "var(--dt-text-secondary)" }}>
                                 {l.paiements === 0 ? "Aucun paiement pour le moment" : `${l.paiements} paiement${l.paiements > 1 ? "s" : ""}, ${l.reussis} réussi${l.reussis > 1 ? "s" : ""}, ${fmtMontant(l.encaisse, l.currency)} encaissés`}
-                            </p>
+                                <ChevronRight className="h-3 w-3" />
+                            </Link>
                             <p className="mb-4 mt-1 truncate font-mono text-[11px]" style={{ color: "var(--dt-text-secondary)" }}>{l.url.replace(/^https?:\/\//, "")}</p>
                             <div className="mt-auto flex items-center gap-2">
                                 <Bouton icone={copie === l.id ? Check : Copy} onClick={() => copier(l)} className="flex-1 whitespace-nowrap">{copie === l.id ? "Copié" : "Copier"}</Bouton>
@@ -122,6 +124,7 @@ export default function LiensDePaiementPage() {
                                 <button type="button" onClick={() => afficherQr(l)} title="QR code" className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: "var(--dt-item-hover)", border: "1px solid var(--dt-border)", color: "var(--dt-text-primary)" }}><QrCode className="h-4 w-4" /></button>
                                 <a href={l.url} target="_blank" rel="noopener noreferrer" title="Ouvrir la page" className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: "var(--dt-item-hover)", border: "1px solid var(--dt-border)", color: "var(--dt-text-primary)" }}><ExternalLink className="h-4 w-4" /></a>
                                 <Dropdown trigger={["click"]} menu={{ items: [
+                                    { key: "detail", icon: <Eye className="h-4 w-4" />, label: <Link href={`/payment-links/${l.id}`}>Paiements et clients</Link> },
                                     { key: "pause", icon: l.status === "active" ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />, label: l.status === "active" ? "Mettre en pause" : "Réactiver", onClick: () => basculer(l) },
                                     { type: "divider" },
                                     { key: "suppr", icon: <Trash2 className="h-4 w-4" />, label: "Supprimer", danger: true, onClick: () => supprimer(l) },
