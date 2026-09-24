@@ -61,7 +61,8 @@ function iconeMethode(tx: any): string | null {
 
 function Methode({ tx }: { tx: any }) {
     const logo = iconeMethode(tx);
-    const passerelle = typeof tx.gatewayDisplay === "string" ? tx.gatewayDisplay : tx.gatewayDisplay?.label;
+    // Espace gere (nyole) : la plateforme encaisse elle-meme, il n'y a pas de passerelle a nommer.
+    const passerelle = typeof tx.gatewayDisplay === "string" ? null : tx.gatewayDisplay?.label;
     return (
         <div className="flex items-center gap-2">
             <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-white ring-1 ring-black/5">
