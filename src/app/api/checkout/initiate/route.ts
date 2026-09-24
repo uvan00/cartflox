@@ -1,3 +1,4 @@
+import { devisePourPayPal } from '@/lib/orchestrator/adapters/paypal.adapter';
 import { detectProviderKey } from "@/lib/cle-fournisseur";
 import { passerelleSertLeMoyen } from "@/lib/catalogue-moyens";
 import { NextRequest, NextResponse } from "next/server";
@@ -422,7 +423,11 @@ export async function POST(req: NextRequest) {
          */
         const localCurrency = providerKey === 'stripe' && ZONES_FRANC.has((deviseLocale || '').toUpperCase())
             ? 'EUR'
-            : deviseLocale;
+            // PayPal ne connait ni le XOF ni le XAF (euro a la parite fixe), ni la
+            // plupart des devises africaines (dollar au cours du jour).
+            : providerKey === 'paypal'
+                ? devisePourPayPal(deviseLocale)
+                : deviseLocale;
         const needsCurrencyConversion = localCurrency !== transaction.currency;
         // Refresh live FX rates (cached 24h; falls back to the static table on
         // failure) so the charged amount uses up-to-date rates, not hardcoded ones.

@@ -131,7 +131,10 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
             || tempPayload.client_reference || tempPayload.ref_command || tempPayload.merchant_transaction_id
             || tempPayload.externalId || tempPayload.external_reference || tempPayload.payment_token
             // FeexPay : callback_info = notre orderId, reference = sa reference (notre providerRef).
-            || tempPayload.callback_info || tempPayload.reference;
+            || tempPayload.callback_info || tempPayload.reference
+            // PayPal : la commande (notre providerRef) ou notre orderId (custom_id) dans `resource`.
+            || tempPayload.resource?.supplementary_data?.related_ids?.order_id || tempPayload.resource?.custom_id
+            || (String(tempPayload.event_type || "").toUpperCase().startsWith("CHECKOUT.ORDER") ? tempPayload.resource?.id : null);
 
         // Without a reference, the OR-filter below would be empty and match an
         // arbitrary transaction — never let that happen.

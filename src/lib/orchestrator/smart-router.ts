@@ -252,6 +252,14 @@ const ROUTING_RULES: ProviderRule[] = [
         successRateEstimate: 0.98,
     },
     {
+        provider: 'paypal',
+        countries: ['*'],
+        currencies: ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'CHF', 'JPY'],
+        methods: ['card'],
+        priority: 8,
+        successRateEstimate: 0.95,
+    },
+    {
         provider: 'flutterwave',
         countries: ['*'],
         currencies: ['*'],

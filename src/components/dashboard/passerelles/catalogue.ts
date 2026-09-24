@@ -187,6 +187,18 @@ export const ALL_PROVIDERS: Fournisseur[] = [
         ],
     },
     {
+        id: 'paypal', name: 'PayPal', logo: '/icons/methods/paypal.svg',
+        countries: ['Global'],
+        description: 'Compte PayPal ou carte bancaire, dans le monde entier. XOF et XAF encaissés en euros, à la parité fixe.',
+        methods: ['PayPal'],
+        apiFields: [
+            { key: 'apiKey', label: 'Client ID', placeholder: 'Client ID de votre application PayPal', configKey: true },
+            { key: 'secret', label: 'Secret', placeholder: 'Secret de votre application PayPal', configKey: true },
+            { key: 'webhookId', label: 'Identifiant du webhook', placeholder: 'Facultatif : l\'ID du webhook déclaré chez PayPal', configKey: true, optionnel: true },
+        ],
+        webhook: "Dans developer.paypal.com, Apps & Credentials, ouvrez votre application puis Webhooks : ajoutez cette adresse et cochez les événements Checkout order approved et Payment capture completed. Chaque succès est reconfirmé auprès de PayPal avant d'être crédité.",
+    },
+    {
         id: 'fedapay', name: 'FedaPay', logo: '/icons/methods/fedapay.svg',
         countries: ['BJ', 'TG', 'CI', 'SN', 'GN', 'ML', 'BF', 'NE'],
         description: 'Paiements simplifiés au Bénin et en Afrique Francophone',
@@ -666,6 +678,7 @@ export const AIDE_CLES: { motif: string; url: string; ou: string }[] = [
     { motif: "pawapay", url: "https://dashboard.pawapay.io/", ou: "rubrique API tokens" },
     { motif: "paystack", url: "https://dashboard.paystack.com/#/settings/developers", ou: "Settings, puis API Keys & Webhooks" },
     { motif: "stripe", url: "https://dashboard.stripe.com/apikeys", ou: "Developers, puis API keys" },
+    { motif: "paypal", url: "https://developer.paypal.com/dashboard/applications/live", ou: "Apps & Credentials, puis votre application : Client ID et Secret (onglet Sandbox pour les clés de test)" },
     { motif: "flutterwave", url: "https://dashboard.flutterwave.com/settings/apis", ou: "Settings, puis API" },
     { motif: "fedapay", url: "https://live.fedapay.com/", ou: "Paramètres, puis Clés API" },
     { motif: "kkiapay", url: "https://app.kkiapay.me/", ou: "Développeurs, puis Clés" },

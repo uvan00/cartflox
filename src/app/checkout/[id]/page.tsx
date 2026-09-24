@@ -381,6 +381,7 @@ const REDIRECT_PROVIDERS = [
     'kkiapay',      // Kkiapay Widget
     'lengopay',     // LengoPay (returns paymentUrl)
     'payplus',      // PayPlus Africa (returns payment_url)
+    'paypal',       // PayPal : commande approuvee sur sa page, capturee au retour
     // PayTech, Magma OnePay, Paystack (GH/KE), MonetBill et FeexPay demandent le
     // numero ICI : la demande part sur le telephone depuis notre page.
     'djamo',        // Djamo Business : lien d'application affiche ICI (bouton + QR), pas de numero

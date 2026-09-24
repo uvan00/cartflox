@@ -22,6 +22,7 @@ import { PayTechAdapter } from "./adapters/paytech.adapter";
 import { OnePayAdapter } from "./adapters/onepay.adapter";
 import { DjamoAdapter } from "./adapters/djamo.adapter";
 import { IPayAdapter } from "./adapters/ipay.adapter";
+import { PayPalAdapter } from './adapters/paypal.adapter';
 import {
     routePayment,
     getAvailableMethods,
@@ -186,6 +187,11 @@ export class PaymentOrchestratorFactory {
                     throw new Error('iPay Money requires configuration: { secretKey, mode }');
                 }
                 return new IPayAdapter(config);
+            case 'paypal':
+                if (!config) {
+                    throw new Error('PayPal requires configuration: { clientId, clientSecret, mode }');
+                }
+                return new PayPalAdapter(config);
 
             default:
                 throw new Error(`Provider ${name} not found in orchestrator`);
@@ -196,7 +202,7 @@ export class PaymentOrchestratorFactory {
      * List all available provider names
      */
     static listProviders(): string[] {
-        return ['mock', 'paydunya', 'pawapay', 'flutterwave', 'feexpay', 'paystack', 'cinetpay', 'stripe', 'kkiapay', 'coinbase', 'fedapay', 'notchpay', 'cryptomus', 'qosic', 'monetbill', 'payplus', 'hub2', 'lengopay'];
+        return ['mock', 'paydunya', 'pawapay', 'flutterwave', 'feexpay', 'paystack', 'cinetpay', 'stripe', 'kkiapay', 'coinbase', 'fedapay', 'notchpay', 'cryptomus', 'qosic', 'monetbill', 'payplus', 'hub2', 'lengopay', 'paypal'];
     }
 
     /**
@@ -322,6 +328,13 @@ export class PaymentOrchestratorFactory {
                 logo: '/icons/methods/lengopay.svg',
                 countries: ['GN', 'MA'],
                 description: 'Paiements en Guinée Conakry et Maroc'
+            },
+            {
+                id: 'paypal',
+                name: 'PayPal',
+                logo: '/icons/methods/paypal.svg',
+                countries: ['Global'],
+                description: 'Compte PayPal ou carte bancaire, dans le monde entier'
             },
         ];
     }

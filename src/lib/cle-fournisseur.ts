@@ -11,7 +11,7 @@ const FOURNISSEURS = [
     "paydunya", "pawapay", "flutterwave", "paystack", "cinetpay", "stripe",
     "kkiapay", "coinbase", "fedapay", "feexpay", "notchpay", "cryptomus",
     "qosic", "monetbill", "payplus", "hub2", "lengopay",
-    "paytech", "onepay", "djamo", "ipay",
+    "paytech", "onepay", "djamo", "ipay", "paypal",
     // « wave » en dernier : « flutterwave » le contient.
     "wave",
 ];

@@ -146,6 +146,9 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
         // Égypte
         { name: "Visa / MasterCard Égypte", country: "Égypte", flag: "EG", type: "CARD", code: "card-eg-paystack", logo: "/icons/methods/credit_card.svg" },
     ],
+    'paypal': [
+        { name: "PayPal", country: "Global", flag: "", type: "CARD", code: "paypal", logo: "/icons/methods/paypal.svg" },
+    ],
     'stripe': [
         { name: "Visa / MasterCard", country: "Global", flag: "", type: "CARD", code: "card-stripe", logo: "/icons/methods/credit_card.svg" },
         { name: "American Express", country: "Global", flag: "", type: "CARD", code: "amex-stripe", logo: "/icons/methods/credit_card.svg" },

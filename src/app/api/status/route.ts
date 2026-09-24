@@ -17,7 +17,7 @@ type Etat = "ok" | "degrade" | "panne" | "inconnu";
 const LIBELLES: Record<string, string> = {
     paydunya: "PayDunya", pawapay: "PawaPay", paystack: "Paystack", stripe: "Stripe",
     fedapay: "FedaPay", kkiapay: "KKiaPay", flutterwave: "Flutterwave", cinetpay: "CinetPay",
-    feexpay: "FeexPay", notchpay: "NotchPay", coinbase: "Coinbase Commerce", hub2: "Hub2",
+    feexpay: "FeexPay", notchpay: "NotchPay", coinbase: "Coinbase Commerce", hub2: "Hub2", paypal: "PayPal",
     moneroo: "Moneroo", softpay: "SoftPay", moneyfusion: "MoneyFusion", bizao: "Bizao",
     touchpay: "TouchPay", intouch: "InTouch", wave: "Wave", orange: "Orange Money",
     cryptomus: "Cryptomus", qosic: "Qosic", monetbill: "MonetBill", payplus: "PayPlus", lengopay: "LengoPay",

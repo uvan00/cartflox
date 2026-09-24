@@ -82,6 +82,12 @@ export function verifyWebhookSignature(
         return timingSafeEqual(sig, expected);
     }
 
+    // ── PayPal ────────────────────────────────────────────────────────────────
+    // La signature PayPal se verifie par un appel a son API (verify-webhook-signature),
+    // pas localement : pas de verification ici (null). La route relit alors la
+    // commande aupres de PayPal sur notre reference, et la capture au passage.
+    if (provider === "paypal") return null;
+
     // ── PayDunya ──────────────────────────────────────────────────────────────
     // No standard HMAC — verify via master_key presence in payload
     if (provider === "paydunya") {

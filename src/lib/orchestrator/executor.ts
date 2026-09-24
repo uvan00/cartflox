@@ -162,6 +162,9 @@ export function buildAdapterConfig(gateway: any, providerName: string): any {
             };
         case 'ipay':
             return { secretKey: config.secretKey || gateway.apiKey, webhookSecret: config.webhookSecret || '', mode: config.mode || 'live' };
+        case 'paypal':
+            // Client ID dans `apiKey`, Secret dans `secret` (noms chiffres au repos, cf. SECRET_KEYS).
+            return { clientId: config.apiKey || gateway.apiKey, clientSecret: config.secret || gateway.apiSecret, webhookId: config.webhookId || '', mode: config.mode || 'live' };
         default:
             return config;
     }
