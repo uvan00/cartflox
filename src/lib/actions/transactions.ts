@@ -33,7 +33,7 @@ const PUBLIC_TX_INCLUDE = {
 function epurer(t: any) {
     if (!t?.application) return t;
     const m = (t.application.metadata as any) || {};
-    return { ...t, application: { ...t.application, metadata: { checkoutTheme: m.checkoutTheme ?? null, checkoutThemeCustom: m.checkoutThemeCustom ?? null } } };
+    return { ...t, application: { ...t.application, metadata: { checkoutTheme: m.checkoutTheme ?? null, checkoutThemeCustom: m.checkoutThemeCustom ?? null, checkoutStyle: m.checkoutStyle ?? null } } };
 }
 
 // Per-process throttle so the checkout's 4s polling doesn't hammer the
@@ -49,7 +49,7 @@ function attenteDepuisVerification(v: any): AttentePaiement | null {
     const r = v?.rawData || {};
     if (v?.checkoutUrl) return { type: "redirection", url: String(v.checkoutUrl), application: r._application || undefined, message: r._instructions || undefined };
     if (r._hub2_otp_required) return { type: "otp", message: r._hub2_otp_message || r._instructions || undefined, ussdCode: r._hub2_otp_ussd || undefined, paymentId: r._hub2_payment_id || undefined };
-    if (typeof r._instructions === "string" && r._instructions) return { type: "ussd", message: r._instructions };
+    if (typeof r._instructions === "string" && r._instructions) return { type: "ussd", message: r._instructions, ussdCode: typeof r._ussd === "string" && r._ussd ? r._ussd : undefined };
     return null;
 }
 

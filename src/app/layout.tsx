@@ -32,7 +32,11 @@ export default function RootLayout({
     return (
         <html lang="fr" className={`dark ${poppins.variable}`} suppressHydrationWarning>
             <head>
-                <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem('afriflow-dashboard-theme')||'dark';var h=document.documentElement;if(t==='light'){h.classList.remove('dark');h.classList.add('light');}else{h.classList.remove('light');h.classList.add('dark');}if(localStorage.getItem('afriflow-smooth-animations')==='false'){h.classList.add('no-animations');}}catch(e){}})();` }} />
+                {/* Pages de paiement (meme regle que estPagePaiement, lib/page-paiement.ts) :
+                    ni le theme sombre du tableau de bord ni ses reglages, avant le
+                    premier rendu. Sinon le fond noir du tableau de bord passait sous
+                    la page du client (ecran noir avant le squelette sur iPhone). */}
+                <script dangerouslySetInnerHTML={{ __html: `(function(){try{var h=document.documentElement,l=location;if(/^checkout\\./i.test(l.hostname)||l.pathname.indexOf('/checkout')===0||l.pathname.indexOf('/pay/')===0){h.classList.remove('dark');h.classList.add('light','page-paiement');return;}var t=localStorage.getItem('afriflow-dashboard-theme')||'dark';if(t==='light'){h.classList.remove('dark');h.classList.add('light');}else{h.classList.remove('light');h.classList.add('dark');}if(localStorage.getItem('afriflow-smooth-animations')==='false'){h.classList.add('no-animations');}}catch(e){}})();` }} />
             </head>
             <body className={`${inter.className} antialiased selection:bg-primary selection:text-black overflow-x-hidden`} suppressHydrationWarning>
         <RechargeSiPerime />
@@ -40,10 +44,11 @@ export default function RootLayout({
                     filtree, aucune image externe. Les grands cercles flous
                     (blur 120 et 150 px) faisaient apparaitre un ecran noir sur
                     les telephones d'entree de gamme, le compositeur renoncant
-                    a produire ces surfaces. */}
+                    a produire ces surfaces. Absent des pages de paiement, qu'il ne
+                    ferait que colorer sous la page du client. */}
                 <div
                     aria-hidden="true"
-                    className="fixed inset-0 pointer-events-none z-0"
+                    className="fond-decoratif fixed inset-0 pointer-events-none z-0"
                     style={{
                         backgroundImage:
                             "radial-gradient(680px 680px at 0% 0%, rgba(124,58,237,0.12), rgba(124,58,237,0) 70%)," +

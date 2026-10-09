@@ -25,6 +25,17 @@ export async function GET(req: NextRequest) {
     const sansReference = { OR: [{ providerRef: null }, { providerRef: "" }] };
     const avecReference = { AND: [{ NOT: { providerRef: null } }, { NOT: { providerRef: "" } }] };
 
+    // 0. Les tentatives INCERTAINES (le fournisseur n'a pas repondu a temps a
+    // l'initiation) : relues aupres de lui apres deux minutes. Reussie ou echouee
+    // chez lui : finalisee ; inconnue de lui : la demande n'est jamais partie.
+    let incertaines = { examinees: 0, finalisees: 0, echouees: 0, encore: 0 };
+    try {
+        const { resoudreIncertaines } = await import("@/lib/orchestrator/tentatives-depot");
+        incertaines = await resoudreIncertaines();
+    } catch (err: unknown) {
+        logger.warn("[cron:sync-pending] tentatives incertaines", { err: String(err) });
+    }
+
     // 1. Mark stalled (no providerRef + >30min) as CANCELLED — the customer
     // never reached the provider, so counting these as FAILED skews the
     // success-rate stats with pure checkout abandons.
@@ -145,6 +156,7 @@ export async function GET(req: NextRequest) {
     }
 
     logger.info("[cron:sync-pending] completed", {
+        incertaines,
         stalled: stalled.count,
         expired: expired.count,
         synced,
@@ -154,6 +166,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({
+        incertaines,
         stalled: stalled.count,
         expired: expired.count,
         synced,

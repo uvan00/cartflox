@@ -37,6 +37,7 @@ export async function recordRoutingDecision(record: RoutingDecisionRecord): Prom
                 chosenGatewayId: record.chosenGatewayId ?? null,
                 assignedOverride: record.assignedOverride ?? false,
                 reason: record.reason ?? null,
+                approche: record.approche ?? null,
                 outcome: 'PENDING',
             },
         });
@@ -51,5 +52,17 @@ export async function updateDecisionOutcome(transactionId: string, outcome: 'SUC
         await (prisma as any).routingDecision.updateMany({ where: { transactionId }, data: { outcome } });
     } catch (e) {
         console.error('[updateDecisionOutcome] error:', e);
+    }
+}
+
+/** Une fois les tentatives jouées : la passerelle qui a gagné et le nombre d'essais. */
+export async function completerDecision(transactionId: string, x: { chosenGatewayId?: string | null; tentatives: number; approche?: string }): Promise<void> {
+    try {
+        await prisma.routingDecision.updateMany({
+            where: { transactionId },
+            data: { tentatives: x.tentatives, ...(x.chosenGatewayId ? { chosenGatewayId: x.chosenGatewayId } : {}), ...(x.approche ? { approche: x.approche } : {}) },
+        });
+    } catch (e) {
+        console.error('[completerDecision] error:', e);
     }
 }

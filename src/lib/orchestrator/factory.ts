@@ -54,7 +54,7 @@ export class PaymentOrchestratorFactory {
                 if (process.env.NODE_ENV === 'production') {
                     throw new Error('Mock payment provider is disabled in production');
                 }
-                return new MockProviderAdapter();
+                return new MockProviderAdapter(config);
 
             case 'paydunya':
                 if (!config) {

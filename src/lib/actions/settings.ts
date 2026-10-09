@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/audit";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { sendPasswordChangedEmail } from "@/lib/email";
+import { styleCheckout } from "@/lib/checkout-styles";
 
 const p = prisma as any;
 
@@ -165,6 +166,27 @@ export async function updateCheckoutTheme(themeId: string) {
     }
 }
 
+/** Le style (la disposition) de la page de paiement : classique, boutique, cartes ou express. */
+export async function updateCheckoutStyle(styleId: string) {
+    try {
+        const session = await getSession();
+        if (!session?.user) return { success: false, error: "Session introuvable. Reconnectez-vous." };
+        const appId = await getSelectedAppId();
+        if (!appId) return { success: false, error: "Aucune application sélectionnée." };
+        const style = styleCheckout(styleId);
+        await prisma.$executeRawUnsafe(
+            `UPDATE "Application" SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb, "updatedAt" = NOW() WHERE id = $2`,
+            JSON.stringify({ checkoutStyle: style }),
+            appId
+        );
+        revalidatePath("/settings");
+        return { success: true };
+    } catch (error: any) {
+        console.error("updateCheckoutStyle error:", error?.message);
+        return { success: false, error: error?.message || "Impossible de mettre à jour le style." };
+    }
+}
+
 export async function updateEmailNotificationSettings(settings: {
     notifyMerchantOnPayment: boolean;
     notifyCustomerOnPayment: boolean;
@@ -240,7 +262,7 @@ export async function getCheckoutCustomization() {
     if (!appId) return null;
     const app = await p.application.findUnique({ where: { id: appId }, select: { name: true, image: true, metadata: true } });
     const meta = (app?.metadata as any) || {};
-    return { name: app?.name || "", image: app?.image || null, checkoutTheme: meta.checkoutTheme || "cartflox", checkoutThemeCustom: meta.checkoutThemeCustom || null };
+    return { name: app?.name || "", image: app?.image || null, checkoutTheme: meta.checkoutTheme || "cartflox", checkoutThemeCustom: meta.checkoutThemeCustom || null, checkoutStyle: styleCheckout(meta.checkoutStyle) };
 }
 
 /** null = revenir aux themes prets a l'emploi. */

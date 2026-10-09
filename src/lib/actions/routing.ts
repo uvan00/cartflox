@@ -328,6 +328,8 @@ export interface RoutingDecisionRecord {
     chosenGatewayId?: string | null;
     assignedOverride?: boolean;
     reason?: string | null;
+    /** Comment l'ordre a été obtenu (routeur du checkout). */
+    approche?: string | null;
 }
 
 

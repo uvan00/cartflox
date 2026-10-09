@@ -8,6 +8,7 @@ import { Check, X, Loader2, Clock, ArrowRight, RotateCcw } from "lucide-react";
 import { getPublicTransaction } from "@/lib/actions/transactions";
 import { attacherReferenceRetour } from "@/lib/actions/retour-fournisseur";
 import { getThemeById, DEFAULT_THEME, type CheckoutTheme } from "@/lib/checkout-themes";
+import { DEFAULT_STYLE, styleCheckout, type CheckoutStyleId } from "@/lib/checkout-styles";
 import { Coque, PanneauMarchand, PiedCarte, BoutonSecondaire, whatsappMarchand } from "@/components/checkout/coque";
 import { useLangue, t, localeNombre, type Cle } from "@/lib/i18n-checkout";
 
@@ -32,6 +33,7 @@ function SuccessContent() {
     const [phase, setPhase] = useState<Phase>('loading');
     const [tx, setTx] = useState<any>(null);
     const [theme, setTheme] = useState<CheckoutTheme>(DEFAULT_THEME);
+    const [style, setStyle] = useState<CheckoutStyleId>(DEFAULT_STYLE);
     // Le sondage s'est arrete sans issue : on propose de reprendre le paiement.
     const [sondageFini, setSondageFini] = useState(false);
 
@@ -56,6 +58,7 @@ function SuccessContent() {
                 setTheme(perso && typeof perso === 'object'
                     ? { ...getThemeById('cartflox'), ...perso, id: 'custom', name: 'Personnalisé' }
                     : getThemeById(meta.checkoutTheme || 'cartflox'));
+                setStyle(styleCheckout(meta.checkoutStyle));
                 if (transaction.status === 'SUCCESS') {
                     setPhase('success');
                     try {
@@ -111,7 +114,7 @@ function SuccessContent() {
     const v = visuals[phase];
 
     return (
-        <Coque theme={theme} langue={langue} test={testMode} gauche={
+        <Coque theme={theme} langue={langue} style={style} etape={3} test={testMode} gauche={
             tx && phase !== 'notfound' ? (
                 <PanneauMarchand theme={theme} marchand={marchand} titre={tx.description || tr("paiement_a", { nom: marchand.nom })} montant={amount || ''} devise={currency}
                     etiquette={phase === 'success' ? tr("montant_paye") : tr("montant")}

@@ -144,10 +144,26 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
         }
 
         const references = [potentialRef, commandeHub2].filter((r): r is string => !!r);
-        const record = await prisma.transaction.findFirst({
+        let record = await prisma.transaction.findFirst({
             where: { OR: references.flatMap((r) => [{ orderId: r }, { providerRef: r }]) } as any,
             orderBy: { createdAt: "desc" },
         });
+        // Une TENTATIVE remplacee (la transaction ne garde que la derniere reference) :
+        // depuis le 08/10/2026 chaque essai garde la sienne, et un paiement accepte a la
+        // premiere tentative n'est plus perdu quand la seconde a ecrase providerRef.
+        let tentativeTrouvee: { id: string; gatewayId: string; providerRef: string | null; reference: string; fournisseur: string } | null = null;
+        // La reference sous laquelle CETTE tentative se relit chez le fournisseur : la
+        // sienne, jamais celle de la tentative courante de la transaction.
+        let refTentative: string | null = null;
+        if (!record) {
+            const { transactionParTentative, VERIFIABLES_PAR_NOTRE_REFERENCE } = await import("@/lib/orchestrator/tentatives-depot");
+            const t = await transactionParTentative(references);
+            if (t) {
+                record = t.transaction;
+                tentativeTrouvee = t.tentative;
+                refTentative = t.tentative.providerRef || (VERIFIABLES_PAR_NOTRE_REFERENCE.has(t.tentative.fournisseur) ? t.tentative.reference : null);
+            }
+        }
 
         if (!record) {
             if (estHub2) {
@@ -170,8 +186,11 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
         // plusieurs passerelles d'une meme famille (« Hub2 Côte d'Ivoire » et
         // « Hub2 Sénégal ») ou des noms qui se contiennent (« Wave », « Flutterwave »).
         const recordMeta = (record.metadata as any) || {};
-        let gateway = recordMeta.gatewayId
-            ? await (prisma as any).gateway.findFirst({ where: { id: recordMeta.gatewayId, applicationId: record.applicationId } }).catch(() => null)
+        // La passerelle de LA tentative visee quand l'evenement concerne une tentative
+        // remplacee : ses cles, pas celles de la tentative suivante.
+        const gatewayIdVise = tentativeTrouvee?.gatewayId || recordMeta.gatewayId;
+        let gateway = gatewayIdVise
+            ? await (prisma as any).gateway.findFirst({ where: { id: String(gatewayIdVise), applicationId: record.applicationId } }).catch(() => null)
             : null;
         if (!gateway) {
             gateway = await (prisma as any).gateway.findFirst({
@@ -222,17 +241,30 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
         // 4. Normalize the webhook data via adapter
         const result = await provider.handleWebhook(payload, headers);
 
-        // Hub2 : un evenement d'une ANCIENNE intention (tentative remplacee) ne doit
-        // pas faire echouer la transaction pendant que l'acheteur reessaie. Seul un
-        // succes compte, et il est reverifie plus bas aupres de Hub2 sur cette
-        // intention-la : un client qui a paye a la premiere tentative est credite.
-        if (estHub2 && record.providerRef && result.providerReference && result.providerReference !== record.providerRef && result.status !== 'SUCCESS') {
-            logger.info("[webhook] hub2 : evenement d'une tentative remplacee, ignore", { txId: record.id, intention: result.providerReference, courante: record.providerRef, statut: result.status });
-            return NextResponse.json({ received: true, ignored: "superseded_intent" });
+        // Un evenement d'une TENTATIVE REMPLACEE (retrouvee par la table Tentative depuis le
+        // 09/10/2026, ou intention Hub2 autre que la courante) ne doit pas faire echouer la
+        // transaction pendant que l'acheteur reessaie. Seul un succes compte, et il est
+        // reverifie plus bas aupres du fournisseur sur CETTE tentative : un client qui a
+        // paye a la premiere tentative est credite.
+        const intentionHub2Remplacee = estHub2 && !!record.providerRef && !!result.providerReference && result.providerReference !== record.providerRef;
+        if ((tentativeTrouvee || intentionHub2Remplacee) && result.status !== 'SUCCESS') {
+            logger.info("[webhook] evenement d'une tentative remplacee, ignore", { txId: record.id, provider: providerName, reference: result.providerReference, courante: record.providerRef, statut: result.status });
+            return NextResponse.json({ received: true, ignored: estHub2 ? "superseded_intent" : "superseded_attempt" });
         }
 
         // Un statut deja tenu : rien a faire (idempotence).
         if (record.status === result.status) {
+            // Succes d'une tentative remplacee sur une transaction DEJA payee par une autre :
+            // deux encaissements possibles pour une commande, a rembourser. On le trace.
+            if (tentativeTrouvee && result.status === 'SUCCESS' && refTentative && refTentative !== record.providerRef) {
+                const verifie = sigValid === true || REVERIFIE_PAR_API.has(providerName.toLowerCase());
+                logger.warn("[webhook] double encaissement possible : une tentative remplacee a aussi reussi", { txId: record.id, provider: providerName, tentative: refTentative, courante: record.providerRef, verifie });
+                if (verifie) {
+                    await prisma.providerLog.create({
+                        data: { transactionId: record.id, type: 'DOUBLE_ENCAISSEMENT_POSSIBLE', payload: { provider: providerName, gatewayId: tentativeTrouvee.gatewayId, tentative: refTentative, courante: record.providerRef } },
+                    }).catch(() => { });
+                }
+            }
             return NextResponse.json({ received: true, ignored: "no_change" });
         }
 
@@ -244,8 +276,11 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
         // echec forge faisait echouer un paiement en cours. Sans reference, un succes
         // est invérifiable (refus) et un echec attend le sondage.
         let resultat = result;
+        // Reference de relecture : celle de la tentative visee quand l'evenement concerne une
+        // tentative remplacee (jamais celle de la tentative courante), sinon celle de la transaction.
+        const referenceRelecture: string | null = tentativeTrouvee ? refTentative : (record.providerRef || null);
         if (sigValid !== true) {
-            if (!record.providerRef) {
+            if (!referenceRelecture) {
                 if (result.status === 'SUCCESS') {
                     logger.warn("[webhook] succes non signe sans reference fournisseur : refuse", { txId: record.id, provider: providerName });
                     return NextResponse.json({ received: true, ignored: "unverified_success" }, { status: 202 });
@@ -253,7 +288,7 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
                 return NextResponse.json({ received: true, ignored: "unsigned_without_reference" }, { status: 202 });
             }
             try {
-                const verified = await provider.verifyPayment(record.providerRef);
+                const verified = await provider.verifyPayment(referenceRelecture);
                 if (!verified || verified.rawData?.error) {
                     logger.warn("[webhook] relecture impossible aupres du fournisseur", { txId: record.id, provider: providerName, error: verified?.rawData?.error });
                     return NextResponse.json({ received: false, error: "Unverifiable payment" }, { status: 400 });
@@ -261,7 +296,7 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
                 if (result.status === 'SUCCESS' && verified.status !== 'SUCCESS') {
                     logger.warn("[webhook] succes annonce, non confirme par le fournisseur : refuse", { txId: record.id, provider: providerName, providerStatus: verified.status });
                 }
-                resultat = { ...verified, providerReference: record.providerRef, rawData: verified.rawData ?? {} };
+                resultat = { ...verified, providerReference: referenceRelecture, rawData: verified.rawData ?? {} };
             } catch (e: any) {
                 logger.warn("[webhook] relecture en erreur : refuse", { txId: record.id, provider: providerName, error: e?.message });
                 return NextResponse.json({ received: false, error: "Unverifiable payment" }, { status: 400 });
@@ -269,6 +304,21 @@ async function traiter(providerName: string, rawBody: string, headers: Record<st
             if (record.status === resultat.status) {
                 return NextResponse.json({ received: true, ignored: "no_change" });
             }
+        }
+
+        // La tentative REMPLACEE a encaisse : la transaction pointe desormais sur elle
+        // (reference, passerelle), sinon un remboursement ou une relecture viserait la
+        // tentative suivante, qui n'a rien encaisse.
+        if (tentativeTrouvee && resultat.status === 'SUCCESS' && refTentative && refTentative !== record.providerRef) {
+            const pointee = await prisma.transaction.update({
+                where: { id: record.id },
+                data: { providerRef: refTentative, provider: gateway?.name || record.provider, metadata: { ...recordMeta, gatewayId: tentativeTrouvee.gatewayId } },
+            }).catch((e: unknown) => {
+                logger.warn("[webhook] transaction non repointee sur la tentative payee", { txId: record?.id, err: String((e as { message?: unknown } | null)?.message || e) });
+                return null;
+            });
+            if (pointee) record = pointee;
+            resultat = { ...resultat, providerReference: refTentative };
         }
 
         // Transition et effets (courriels, notification, webhook sortant, piste de

@@ -110,6 +110,20 @@ export class PayDunyaAdapter implements IPaymentProvider {
                 };
             }
 
+            // Secours du routeur (25/09/2026) : un paiement mobile money bascule sur
+            // PayDunya. La demande est poussee sur le telephone (SoftPay) au lieu de
+            // renvoyer le client vers la page PayDunya : il reste sur la page de
+            // paiement. La reference reste la facture, que la verification relit.
+            if (request.metadata?.softpay === true) {
+                const pousse = await this.processSoftPay(data.token, String(request.metadata?.methodCode || ''), {
+                    name: request.customerName,
+                    email: request.customerEmail,
+                    phone: request.customerPhone,
+                    country: request.metadata?.pays,
+                });
+                return { ...pousse, transactionId: data.token, providerReference: data.token };
+            }
+
             return {
                 transactionId: data.token,
                 providerReference: data.token,
@@ -149,6 +163,12 @@ export class PayDunyaAdapter implements IPaymentProvider {
             const emailValide = (e?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e || '');
             if (!emailValide(details.email) && emailValide(process.env.MAIL_FROM)) {
                 details = { ...details, email: process.env.MAIL_FROM };
+            }
+            // Le nom aussi est facultatif (session de paiement créée par API sans nom),
+            // mais Wave Côte d'Ivoire refuse un nom vide (« Votre requete est malformée » :
+            // les 3 refus Wave du 28 au 30/09/2026, tous sans nom). Un seul mot suffit.
+            if (!String(details.name || '').trim()) {
+                details = { ...details, name: 'Client' };
             }
 
             // PAYDUNYA SOFT PAY FIELD MAPPING (Inconsistent across countries/operators)

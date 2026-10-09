@@ -4,10 +4,10 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { MARQUE } from "@/lib/marque";
 import { motion, AnimatePresence } from "framer-motion";
 import { preconnect } from "react-dom";
-import { arrondirMontant } from "@/lib/devises";
+import { DEVISE_PAYS_CHECKOUT, TAUX_XOF_REPLI, convertirAvecTaux, deviseDuMoyen } from "@/lib/taux-change";
 import {
     Zap, Loader2, Check, Search, ChevronDown, Lock, Globe,
-    Smartphone as Phone, CheckCircle2, X, Wifi, User, Star, Copy, ArrowRight,
+    Smartphone as Phone, CheckCircle2, X, Star, Copy, ArrowRight, ShieldCheck,
 } from "lucide-react";
 import { FlaskConical as IconeFiole } from "lucide-react";
 import { getCountries, getCountryCallingCode } from 'react-phone-number-input/input';
@@ -17,14 +17,18 @@ import { getPublicTransaction } from "@/lib/actions/transactions";
 import { journaliserEchecCarte } from "@/lib/actions/echec-carte";
 import { qrDuPaiement } from "@/lib/actions/qr-paiement";
 import { getPaymentMethodsByAppId } from "@/lib/actions/methods";
+import { paysDuVisiteur } from "@/lib/actions/pays-visiteur";
 import { lookupPayer, updatePayerAfterPayment } from "@/lib/actions/payer-identity";
 import { useParams, useRouter } from "next/navigation";
 import { goeyToast } from "goey-toast";
 import { getThemeById, DEFAULT_THEME, type CheckoutTheme } from "@/lib/checkout-themes";
+import { DEFAULT_STYLE, styleCheckout, type CheckoutStyleId } from "@/lib/checkout-styles";
 import {
     Coque, PanneauMarchand, PiedCarte, BoutonPrincipal, BoutonSecondaire, Etiquette, Alerte, LogosOperateurs, champStyle, whatsappMarchand,
 } from "@/components/checkout/coque";
 import { Drapeau } from "@/components/ui/drapeau";
+import { completerBenin, getPhoneFormat, paysDuNumeroRecu } from "@/lib/formats-telephone";
+import { getOperatorKey } from "@/lib/catalogue-moyens";
 import { useLangue, t, nomPays, localeNombre, type Langue, type Cle } from "@/lib/i18n-checkout";
 
 /**
@@ -40,6 +44,7 @@ function messageAcheteur(brut: unknown, langue: Langue, defaut: string): string 
     const m = typeof brut === "string" ? brut.trim() : "";
     if (!m) return defaut;
     if (/too many requests|rate limit|trop de (requêtes|tentatives)/i.test(m)) return t(langue, "trop_de_tentatives");
+    if (/pas encore activé chez ce marchand/i.test(m)) return t(langue, "moyen_non_active");
     if (/^[A-Za-z0-9 _.,'":()/-]{0,200}$/.test(m) && /\b(the|please|invalid|error|failed|not|request)\b/i.test(m)) return defaut;
     return m;
 }
@@ -130,68 +135,8 @@ function messageCarte(erreur: any, langue: Langue): string | null {
     return null;
 }
 
-const COUNTRY_CURRENCY_MAP: Record<string, string> = {
-    // UEMOA
-    CI: 'XOF', SN: 'XOF', BJ: 'XOF', ML: 'XOF', BF: 'XOF', TG: 'XOF', NE: 'XOF', GW: 'XOF',
-    // CEMAC
-    CM: 'XAF', GA: 'XAF', CG: 'XAF', TD: 'XAF', CF: 'XAF',
-    // Autres Afrique
-    GN: 'GNF', CD: 'CDF', GH: 'GHS', NG: 'NGN', KE: 'KES', TZ: 'TZS',
-    UG: 'UGX', RW: 'RWF', ZA: 'ZAR', ZM: 'ZMW', MW: 'MWK', MZ: 'MZN',
-    AO: 'AOA', ET: 'ETB', MG: 'MGA', SL: 'SLE', MR: 'MRU', GM: 'GMD',
-    LR: 'LRD', SD: 'SDG', SO: 'SOS', MA: 'MAD', DZ: 'DZD', TN: 'TND',
-    EG: 'EGP', LY: 'LYD',
-    // Global
-    US: 'USD', GB: 'GBP', EU: 'EUR', FR: 'EUR', DE: 'EUR',
-};
-
-// Taux de change indicatifs vers XOF (1 XOF = X devise cible)
-// ⚠️ Doit rester aligné avec XOF_RATES côté serveur
-// (src/app/api/checkout/initiate/route.ts) qui détermine le montant facturé.
-// Ancrage : 1 USD ≈ 615 XOF. MAJ 2026-06.
-const XOF_TO_CURRENCY_RATE: Record<string, number> = {
-    XOF: 1,
-    XAF: 1,           // parité fixe CEMAC/UEMOA
-    GNF: 14,
-    CDF: 4.7,
-    GHS: 0.019,
-    NGN: 2.5,
-    KES: 0.21,
-    TZS: 4.3,
-    UGX: 5.9,
-    RWF: 2.3,
-    ZAR: 0.029,
-    ZMW: 0.042,
-    MWK: 2.8,
-    MZN: 0.104,
-    AOA: 1.5,
-    ETB: 0.23,
-    MGA: 7.3,
-    MAD: 0.016,
-    DZD: 0.21,
-    TND: 0.0048,
-    EGP: 0.079,
-    SLE: 0.037,
-    MRU: 0.065,
-    USD: 0.00163,
-    EUR: 0.001524,    // parité fixe EUR/XOF (655.957)
-    GBP: 0.00127,
-};
-
-function convertAmount(amount: number, fromCurrency: string, toCurrency: string): number {
-    const from = (fromCurrency || 'XOF').toUpperCase();
-    const to = (toCurrency || 'XOF').toUpperCase();
-    if (from === to) return Number(amount);
-    // Convert to XOF first, then to target
-    const toXOFRate = from === 'XOF' ? 1 : (1 / (XOF_TO_CURRENCY_RATE[from] || 1));
-    const amountInXOF = Number(amount) * toXOFRate;
-    const rate = XOF_TO_CURRENCY_RATE[to] || 1;
-    return arrondirMontant(amountInXOF * rate, to);
-}
-
 const WORLD_COUNTRIES = getCountries().map(code => ({
     code, name: fr[code] || code, dial_code: `+${getCountryCallingCode(code)}`,
-    currency: COUNTRY_CURRENCY_MAP[code] || 'XOF',
 }));
 
 /**
@@ -261,74 +206,7 @@ function suggestionsDeLAdresse(): { pays: string | null; tel: string } {
     };
 }
 
-// Bénin : depuis le 30 novembre 2024, tous les numéros ont 10 chiffres, l'ancien
-// numéro à 8 précédé de 01. Un client qui tape encore ses 8 chiffres par habitude
-// obtient le 01 tout seul, plutôt qu'un refus.
-const completerBenin = (chiffres: string, pays: string) =>
-    pays === 'BJ' && chiffres.length === 8 ? `01${chiffres}` : chiffres;
-
-// ── Phone format per country: { placeholder, maxLen (local digits including leading zero if any) }
-// Sources: ITU / Wikipedia / operator sites - updated 2024/2025
-const PHONE_FORMAT: Record<string, { placeholder: string; maxLen: number }> = {
-    // UEMOA
-    CI: { placeholder: '07 XX XX XX XX', maxLen: 10 }, // 10 digits since Jan 2021 (07=Orange, 05=MTN, 01=Moov/Wave)
-    SN: { placeholder: '77 XXX XX XX',   maxLen: 9  }, // 9 digits (70/75/76/77/78)
-    BJ: { placeholder: '01 97 XX XX XX', maxLen: 10 }, // 10 chiffres depuis le 30 nov. 2024 : le préfixe 01 devant l'ancien numéro à 8
-    ML: { placeholder: '76 XX XX XX',    maxLen: 8  }, // 8 digits (70-79)
-    BF: { placeholder: '76 XX XX XX',    maxLen: 8  }, // 8 digits (70-77)
-    TG: { placeholder: '92 XX XX XX',    maxLen: 8  }, // 8 digits (90-99)
-    NE: { placeholder: '93 XX XX XX',    maxLen: 8  }, // 8 digits (90-99)
-    GW: { placeholder: '96 XXX XX',      maxLen: 7  }, // 7 digits (96x/95x)
-    // CEMAC
-    CM: { placeholder: '6XX XXX XXX',    maxLen: 9  }, // 9 digits (starts with 6)
-    GA: { placeholder: '07 XX XX XX',    maxLen: 8  }, // 8 digits (07x/06x/04x)
-    CG: { placeholder: '06 XXX XX XX',   maxLen: 9  }, // 9 digits
-    CD: { placeholder: '81X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0 (81x/82x/84x/85x/89x/90x/97x/99x)
-    TD: { placeholder: '63 XX XX XX',    maxLen: 8  }, // 8 digits
-    CF: { placeholder: '75 XX XX XX',    maxLen: 8  }, // 8 digits
-    // Other African
-    GN: { placeholder: '628 XX XX XX',   maxLen: 9  }, // 9 digits (62x/63x/64x/65x/66x)
-    GH: { placeholder: '054 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (020/023/024/026/027/028/050/054/055/057/059)
-    NG: { placeholder: '0803 XXX XXXX',  maxLen: 11 }, // 11 chiffres avec le 0 (070/080/081/090/091)
-    KE: { placeholder: '712 XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0 (07xx)
-    TZ: { placeholder: '7XX XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
-    UG: { placeholder: '75X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
-    RW: { placeholder: '78X XXX XXX',    maxLen: 10 }, // 10 chiffres avec le 0
-    ZA: { placeholder: '71 XXX XXXX',    maxLen: 10 }, // 10 chiffres avec le 0
-    MG: { placeholder: '32X XX XXX',     maxLen: 10 }, // 10 chiffres avec le 0 (032/33x/34x/38x)
-    SL: { placeholder: '76 XX XXXX',     maxLen: 8  }, // 8 digits
-    MR: { placeholder: '36 XX XX XX',    maxLen: 8  }, // 8 digits
-    // Afrique de l'Est et australe (couverture PawaPay, Flutterwave, Paystack)
-    ZM: { placeholder: '097 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (095 Zamtel, 096 MTN, 097 Airtel)
-    MW: { placeholder: '099 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (088 TNM, 099 Airtel)
-    MZ: { placeholder: '84 XXX XXXX',    maxLen: 9  }, // 9 chiffres (82/83 Movitel, 84/85 Vodacom, 86/87 Tmcel)
-    ET: { placeholder: '09XX XXX XXX',   maxLen: 10 }, // 10 chiffres avec le 0 (09 Ethio telecom, 07 Safaricom)
-    BI: { placeholder: '79 XX XX XX',    maxLen: 8  }, // 8 chiffres
-    LS: { placeholder: '5X XXX XXX',     maxLen: 8  }, // 8 chiffres (5x Vodacom, 6x Econet)
-    ZW: { placeholder: '077 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (071 NetOne, 073 Telecel, 077/078 Econet)
-    BW: { placeholder: '71 XXX XXX',     maxLen: 8  }, // 8 chiffres
-    NA: { placeholder: '081 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0
-    AO: { placeholder: '9XX XXX XXX',    maxLen: 9  }, // 9 chiffres
-    // Afrique de l'Ouest anglophone et lusophone
-    LR: { placeholder: '077 XXX XXXX',   maxLen: 10 }, // 10 chiffres avec le 0 (077 Lonestar MTN, 088 Orange)
-    GM: { placeholder: '3XX XXXX',       maxLen: 7  }, // 7 chiffres
-    CV: { placeholder: '9XX XX XX',      maxLen: 7  }, // 7 chiffres
-    // Afrique du Nord
-    MA: { placeholder: '06 XX XX XX XX', maxLen: 10 }, // 10 chiffres avec le 0 (06/07)
-    DZ: { placeholder: '05 XX XX XX XX', maxLen: 10 }, // 10 chiffres avec le 0 (05/06/07)
-    TN: { placeholder: '2X XXX XXX',     maxLen: 8  }, // 8 chiffres
-    EG: { placeholder: '010 XXXX XXXX',  maxLen: 11 }, // 11 chiffres avec le 0 (010 Vodafone, 011 Etisalat, 012 Orange, 015 WE)
-    // Océan Indien
-    KM: { placeholder: '3XX XX XX',      maxLen: 7  }, // 7 chiffres
-    MU: { placeholder: '5XXX XXXX',      maxLen: 8  }, // 8 chiffres
-    SC: { placeholder: '2 XXX XXX',      maxLen: 7  }, // 7 chiffres
-    // Default
-    DEFAULT: { placeholder: 'XX XX XX XX', maxLen: 10 },
-};
-
-function getPhoneFormat(countryCode: string) {
-    return PHONE_FORMAT[countryCode] || PHONE_FORMAT.DEFAULT;
-}
+// Formats de numeros par pays et regle du Benin : src/lib/formats-telephone.ts
 
 // --- Express Pay: localStorage profile ---
 const EXPRESS_KEY = 'afriflow_express';
@@ -402,7 +280,7 @@ const isRedirectOnlyProvider = (method: any): boolean => {
 };
 
 /** Nom d'affichage d'un moyen, sans le suffixe pays. */
-const nomCourt = (name: string) => (name || '').replace(/ (CI|SN|BJ|ML|BF|TG|International)$/i, '');
+const nomCourt = (name: string) => (name || '').replace(/ (CI|SN|BJ|ML|BF|TG|International|XOF|XAF|USD|EUR|GHS|NGN|KES|ZAR)$/i, '');
 
 /** Ce que le client doit faire sur son telephone, par operateur, dans la langue de la page. */
 const etapesConfirmation = (method: any, langue: Langue): string[] => {
@@ -422,6 +300,123 @@ const etapesApplication = (nom: string, langue: Langue): string[] => [
     t(langue, "etape_app_3"),
 ];
 
+/**
+ * Les animations d'attente du parcours (25/09/2026), a la place du rouet a
+ * eclair et du halo qui battait autour d'une icone wifi. Un anneau de progres
+ * tourne autour du logo de l'operateur pendant la connexion et la
+ * verification ; un telephone vibre, avec sa pastille de notification, tant
+ * que le client doit confirmer ; trois points respirent a la place d'un
+ * rouet. Un seul mouvement par ecran, et rien pour qui a demande moins
+ * d'animations (motion-safe).
+ */
+function AnneauAttente({ theme, children }: { theme: CheckoutTheme; children: React.ReactNode }) {
+    return (
+        <div className="relative grid h-16 w-16 place-content-center" aria-hidden="true">
+            <svg className="absolute inset-0 h-16 w-16 motion-safe:animate-spin" style={{ animationDuration: "1.8s" }} viewBox="0 0 64 64" fill="none">
+                <circle cx="32" cy="32" r="29.5" stroke={theme.divider} strokeWidth="2.5" />
+                <motion.circle cx="32" cy="32" r="29.5" stroke={theme.accent} strokeWidth="2.5" strokeLinecap="round"
+                    initial={{ pathLength: 0.12 }} animate={{ pathLength: [0.12, 0.72, 0.12] }} transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }} />
+            </svg>
+            <span className="grid h-11 w-11 place-content-center overflow-hidden rounded-full" style={{ background: theme.methodHoverBg }}>{children}</span>
+        </div>
+    );
+}
+
+function TelephoneQuiVibre({ theme }: { theme: CheckoutTheme }) {
+    return (
+        <div className="relative grid h-16 w-16 place-content-center rounded-full" style={{ background: theme.methodSelectedBg, color: theme.methodSelectedBorder }} aria-hidden="true">
+            <motion.span className="grid" animate={{ rotate: [0, -9, 9, -7, 7, -3, 3, 0] }} transition={{ repeat: Infinity, duration: 0.8, repeatDelay: 1.6, ease: "easeInOut" }}>
+                <Phone size={26} />
+            </motion.span>
+            <span className="absolute right-3 top-3 grid h-3 w-3 place-content-center">
+                <span className="absolute inset-0 rounded-full motion-safe:animate-ping" style={{ background: theme.accent, opacity: 0.45, animationDuration: "2.4s" }} />
+                <span className="relative h-2.5 w-2.5 rounded-full" style={{ background: theme.accent, boxShadow: `0 0 0 2px ${theme.cardBg}` }} />
+            </span>
+        </div>
+    );
+}
+
+function PointsAttente({ couleur }: { couleur: string }) {
+    return (
+        <span className="inline-flex items-center gap-1" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+                <motion.span key={i} className="h-1.5 w-1.5 rounded-full" style={{ background: couleur }}
+                    animate={{ opacity: [0.25, 1, 0.25] }} transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2, ease: "easeInOut" }} />
+            ))}
+        </span>
+    );
+}
+
+/**
+ * Ecran de verification (25/09/2026), a la place de la loupe qui faisait
+ * croire a une page de recherche : le logo de l'operateur dans l'anneau, et
+ * ou en est le paiement en trois etapes. L'anneau reste le seul mouvement.
+ * Au bout de 30 secondes sans reponse, une ligne rassure et dit de ne pas
+ * payer une seconde fois.
+ */
+function EcranVerification({ theme, tr, logo, repondant, numero, onRetour }: {
+    theme: CheckoutTheme;
+    tr: (cle: Cle, valeurs?: Record<string, string | number>) => string;
+    logo?: string | null;
+    repondant: string;
+    numero?: string | null;
+    onRetour: () => void;
+}) {
+    const [lente, setLente] = useState(false);
+    useEffect(() => {
+        const minuteur = setTimeout(() => setLente(true), 30_000);
+        return () => clearTimeout(minuteur);
+    }, []);
+    const etapes: { texte: string; detail?: string | null; etat: "fait" | "en_cours" | "a_venir" }[] = [
+        { texte: tr("verif_demande_envoyee"), detail: numero, etat: "fait" },
+        { texte: tr("verif_reponse_de", { nom: repondant }), etat: "en_cours" },
+        { texte: tr("verif_paiement_confirme"), etat: "a_venir" },
+    ];
+    return (
+        <div className="flex flex-col gap-5 px-6 py-7">
+            <div className="flex flex-col items-center gap-3 text-center">
+                <AnneauAttente theme={theme}>
+                    {logo ? <img src={logo} alt="" className="h-6 w-6 object-contain" /> : <ShieldCheck size={22} style={{ color: theme.accent }} />}
+                </AnneauAttente>
+                <div>
+                    <h2 className="text-[17px] font-semibold tracking-tight" style={{ color: theme.textPrimary }}>{tr("verification_paiement")}</h2>
+                    <p className="mt-1 text-[12.5px] leading-relaxed" style={{ color: theme.textMuted }}>{tr("verification_texte", { nom: repondant })}</p>
+                </div>
+            </div>
+            <ol className="flex flex-col rounded-xl p-4" style={{ background: theme.methodHoverBg }}>
+                {etapes.map((e, i) => (
+                    <li key={i} aria-current={e.etat === "en_cours" ? "step" : undefined} className="relative flex items-start gap-3 pb-4 last:pb-0">
+                        {i < etapes.length - 1 && (
+                            <span className="absolute bottom-0.5 left-[9.5px] top-[23px] w-px" style={{ background: e.etat === "fait" ? theme.accent : theme.methodBorder }} aria-hidden="true" />
+                        )}
+                        {e.etat === "fait" ? (
+                            <span className="grid h-5 w-5 shrink-0 place-content-center rounded-full" style={{ background: theme.accent, color: theme.accentText }}><Check size={11} strokeWidth={3} /></span>
+                        ) : (
+                            <span className="grid h-5 w-5 shrink-0 place-content-center rounded-full" style={{ background: theme.cardBg, border: `1.5px solid ${e.etat === "en_cours" ? theme.accent : theme.methodBorder}` }}>
+                                {e.etat === "en_cours" && <span className="h-2 w-2 rounded-full" style={{ background: theme.accent }} />}
+                            </span>
+                        )}
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3 text-[13px] leading-5">
+                            <span className={e.etat === "en_cours" ? "font-semibold" : "font-medium"} style={{ color: e.etat === "a_venir" ? theme.textMuted : theme.textPrimary }}>{e.texte}</span>
+                            {e.detail && <span className="truncate text-[12px] tabular-nums" style={{ color: theme.textMuted }}>{e.detail}</span>}
+                        </span>
+                    </li>
+                ))}
+            </ol>
+            <div className="flex flex-col items-center gap-2 text-center">
+                <AnimatePresence>
+                    {lente && (
+                        <motion.p key="lente" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[12px] leading-relaxed" style={{ color: theme.textSecondary }} role="status">
+                            {tr("verif_lente")}
+                        </motion.p>
+                    )}
+                </AnimatePresence>
+                <button type="button" onClick={onRetour} className="text-[12px] underline underline-offset-2" style={{ color: theme.textMuted }}>{tr("retour")}</button>
+            </div>
+        </div>
+    );
+}
+
 export default function CheckoutPage() {
     const params = useParams();
     const router = useRouter();
@@ -429,6 +424,11 @@ export default function CheckoutPage() {
     // Langue de la page (adresse, choix memorise, navigateur) et raccourci de traduction.
     const { langue, changerLangue } = useLangue();
     const tr = (cle: Cle, valeurs?: Record<string, string | number>) => t(langue, cle, valeurs);
+    // Un moyen grise dit pourquoi : sous le minimum d'une passerelle, ce minimum
+    // (« A partir de 200 XOF ») ; sinon, la panne passagere.
+    const etiquetteIndisponible = (m: any) => m?.minimum
+        ? tr("a_partir_de", { montant: new Intl.NumberFormat(localeNombre(langue)).format(Number(m.minimum.montant)), devise: String(m.minimum.devise) })
+        : tr("indisponible");
 
     // Code a scanner pour finir le paiement sur telephone. Rendu cote serveur
     // (la fabrication du QR utilise sharp), demande une seule fois.
@@ -443,6 +443,15 @@ export default function CheckoutPage() {
     const [transaction, setTransaction] = useState<any>(null);
     const [methods, setMethods] = useState<any[]>([]);
     const [checkoutTheme, setCheckoutTheme] = useState<CheckoutTheme>(DEFAULT_THEME);
+    // Le style (la disposition) choisi par le marchand dans ses reglages ;
+    // `?style=` dans l'adresse l'emporte, pour l'apercu depuis les reglages.
+    const [styleMarchand, setStyleMarchand] = useState<CheckoutStyleId>(DEFAULT_STYLE);
+    const [styleForce, setStyleForce] = useState<CheckoutStyleId | null>(null);
+    useEffect(() => {
+        const demande = new URLSearchParams(window.location.search).get("style");
+        if (demande) setStyleForce(styleCheckout(demande));
+    }, []);
+    const style: CheckoutStyleId = styleForce || styleMarchand;
     const [isLoading, setIsLoading] = useState(true);
     const [selectedMethod, setSelectedMethod] = useState<any>(null);
     const [isPaying, setIsPaying] = useState(false);
@@ -459,6 +468,11 @@ export default function CheckoutPage() {
     const [identityProfile, setIdentityProfile] = useState<any>(null);
     const [identityLoading, setIdentityLoading] = useState(false);
     const [identityMode, setIdentityMode] = useState(false); // true = fast checkout for recognized payer
+
+    const [taux, setTaux] = useState<Record<string, number>>(TAUX_XOF_REPLI);
+    useEffect(() => {
+        fetch("/api/v1/taux").then((r) => r.json()).then((d) => { if (d?.taux) setTaux(d.taux); }).catch(() => { });
+    }, []);
 
     const [selectedCountryCode, setSelectedCountryCode] = useState(() => {
         if (typeof window === 'undefined') return "SN";
@@ -626,8 +640,9 @@ export default function CheckoutPage() {
 
     useEffect(() => {
         if (filteredMethods.length > 0) {
-            const currentStillValid = selectedMethod && filteredMethods.find(m => m.id === selectedMethod.id);
-            if (!currentStillValid) setSelectedMethod(filteredMethods[0]);
+            const currentStillValid = selectedMethod && filteredMethods.find(m => m.id === selectedMethod.id && !m.indisponible);
+            // Un moyen grise (indisponible partout pour le moment) n'est jamais choisi d'office.
+            if (!currentStillValid) setSelectedMethod(filteredMethods.find((m: any) => !m.indisponible) || null);
         }
     }, [filteredMethods, selectedMethod]);
 
@@ -636,6 +651,9 @@ export default function CheckoutPage() {
     const loadData = async () => {
         setIsLoading(true);
         const minDelay = new Promise(resolve => setTimeout(resolve, 600));
+        // Pays du visiteur d'apres son adresse IP, demande en meme temps que la
+        // transaction : il est presque toujours la quand on en a besoin.
+        const paysIpDemande = paysDuVisiteur().catch(() => null);
         try {
             const [tx] = await Promise.all([getPublicTransaction(transactionId), minDelay]);
             if (tx) {
@@ -650,11 +668,15 @@ export default function CheckoutPage() {
                 // Beaucoup de marchands envoient l'international sans le "+"
                 // ("2250102030405") : libphonenumber ne reconnait pas cette
                 // forme. On retente avec un "+" devant, sinon le numero reste
-                // entier a cote de l'indicatif deja affiche par le champ.
+                // entier a cote de l'indicatif deja affiche par le champ. Un
+                // numero LOCAL ("92458641", Togo) deviendrait "+92..." (Pakistan) :
+                // cette relecture ne vaut que si elle donne un numero valide, ou
+                // si les chiffres sont assez longs pour porter un indicatif.
                 const chiffresPhone = rawPhone.replace(/\D/g, '');
+                const avecPlus = chiffresPhone ? parsePhoneNumberFromString('+' + chiffresPhone) : null;
                 const parsedRaw = rawPhone
                     ? (parsePhoneNumberFromString(rawPhone)
-                        || (chiffresPhone ? parsePhoneNumberFromString('+' + chiffresPhone) : null))
+                        || (avecPlus && (avecPlus.isValid() || (chiffresPhone.length >= 11 && !chiffresPhone.startsWith('0'))) ? avecPlus : null))
                     : null;
                 const suggere = suggestionsDeLAdresse();
                 setPhoneNumber(suggere.tel || (parsedRaw ? parsedRaw.nationalNumber : rawPhone.replace(/^\+\d{1,3}/, '')));
@@ -665,25 +687,54 @@ export default function CheckoutPage() {
                 setCheckoutTheme(perso && typeof perso === 'object'
                     ? { ...getThemeById('cartflox'), ...perso, id: 'custom', name: 'Personnalisé' }
                     : getThemeById(meta?.checkoutTheme || 'cartflox'));
-                const methodesDisponibles = await getPaymentMethodsByAppId(tx.applicationId!);
+                setStyleMarchand(styleCheckout(meta?.checkoutStyle));
+                const methodesDisponibles = await getPaymentMethodsByAppId(tx.applicationId!, tx.currency, tx.amount);
                 // Paiement a Cartflox (abonnement) : mobile money seulement, jamais la carte.
                 const availableMethods = (tx.metadata as any)?.moyens === "mobile_money"
                     ? methodesDisponibles.filter((m: any) => !/card|carte|visa|master/i.test(`${m.type || ""} ${m.name || ""} ${m.code || ""}`))
                     : methodesDisponibles;
                 const txEnTest = (tx as any).test === true || (tx as any).application?.liveMode === false;
                 setMethods(availableMethods.length === 0 && txEnTest ? [METHODE_TEST] : availableMethods);
-                let detectedCode: string | null = null;
-                if (tx.customerPhone) {
-                    const parsed = parsePhoneNumberFromString(tx.customerPhone);
-                    if (parsed && parsed.country) { detectedCode = parsed.country; paysDuNumeroRef.current = parsed.country; }
-                }
-                if (!detectedCode && (tx as any).application?.user?.country) {
+                let paysMarchand: string | null = null;
+                if ((tx as any).application?.user?.country) {
                     const hint = (tx as any).application.user.country.toLowerCase();
                     const found = WORLD_COUNTRIES.find(c => c.name.toLowerCase() === hint || c.code.toLowerCase() === hint);
-                    if (found) detectedCode = found.code;
+                    if (found) paysMarchand = found.code;
                 }
+                // Pays ou se trouve le client (adresse IP). La demande est partie avec
+                // celle de la transaction ; depuis Stockholm, la reponse
+                // d'api.country.is met parfois plus de 400 ms a revenir.
+                let paysClient: string | null = null;
+                if (!suggere.pays) {
+                    const ip = await Promise.race([paysIpDemande, new Promise<null>(r => setTimeout(() => r(null), 1500))]);
+                    if (ip && WORLD_COUNTRIES.some(c => c.code === ip)) paysClient = ip;
+                }
+                // Pays du numero recu, lu avec son contexte (paysDuNumeroRecu) : un
+                // site marchand colle souvent SON indicatif (« +229 ») devant le numero
+                // de son client (ivoirien, vu le 04/10/2026). Il passe avant tout le
+                // reste, car le mobile money suit le numero.
+                const locaux = [...new Set(availableMethods
+                    .filter((m: any) => !ZONES_MONDIALES.includes(sansAccent(m.country)))
+                    .map((m: any) => codePays(m.country))
+                    .filter((c: string | null): c is string => !!c))];
+                const detectedCode = rawPhone ? paysDuNumeroRecu({
+                    chiffres: parsedRaw ? parsedRaw.nationalNumber : chiffresPhone,
+                    declare: parsedRaw?.country ?? null,
+                    client: paysClient,
+                    locaux,
+                    marchand: paysMarchand,
+                }) : null;
+                if (detectedCode) paysDuNumeroRef.current = detectedCode;
+                // Sans numero exploitable, le pays ou se trouve le client passe avant
+                // celui du marchand, a condition que le marchand y ait un moyen de
+                // paiement : sinon la page s'ouvrirait sur une liste vide.
+                const payableIci = (code: string) => availableMethods.some((m: any) =>
+                    ZONES_MONDIALES.includes(sansAccent(m.country)) || codePays(m.country) === code);
+                const paysIp = paysClient && payableIci(paysClient) ? paysClient : null;
                 if (suggere.pays) setSelectedCountryCode(suggere.pays);
                 else if (detectedCode) setSelectedCountryCode(detectedCode);
+                else if (paysIp) setSelectedCountryCode(paysIp);
+                else if (paysMarchand) setSelectedCountryCode(paysMarchand);
                 else {
                     try {
                         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone.toLowerCase();
@@ -767,6 +818,27 @@ export default function CheckoutPage() {
 
     const [paymentStatus, setPaymentStatus] = useState<null | 'initiating' | 'carte' | 'pending_user' | 'require_otp' | 'verifying' | 'success' | 'error'>(null);
 
+    // Sante des moyens (25/09/2026) : tant que le client choisit, la liste est
+    // relue chaque minute. Un moyen tombe en panne se grise, un moyen retabli se
+    // degrise, et un moyen repris par une autre passerelle part vers elle.
+    useEffect(() => {
+        const appId = (transaction as any)?.applicationId;
+        if (!appId || paymentStatus) return;
+        const t = window.setInterval(async () => {
+            if (document.hidden) return;
+            const frais: any[] | null = await getPaymentMethodsByAppId(appId, (transaction as any)?.currency, (transaction as any)?.amount).catch(() => null);
+            if (!Array.isArray(frais) || frais.length === 0) return;
+            const parCle = new Map(frais.filter((n: any) => n?.cle).map((n: any) => [n.cle, n]));
+            const maj = (m: any) => {
+                const n: any = m?.cle ? parCle.get(m.cle) : null;
+                return n ? { ...m, indisponible: !!n.indisponible, minimum: n.minimum, gatewayId: n.gatewayId, code: n.code, gateway: n.gateway } : m;
+            };
+            setMethods((prev) => prev.map(maj));
+            setSelectedMethod((sel: any) => (sel ? maj(sel) : sel));
+        }, 60_000);
+        return () => window.clearInterval(t);
+    }, [transaction, paymentStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
     const CHECKOUT_TIMEOUT_SECONDS = 15 * 60; // 15 minutes
     const [sessionSecondsLeft, setSessionSecondsLeft] = useState(CHECKOUT_TIMEOUT_SECONDS);
     const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -817,6 +889,19 @@ export default function CheckoutPage() {
     const [simulationEnCours, setSimulationEnCours] = useState(false);
     // Consigne envoyee par le fournisseur avec la demande (OnePay, Paystack, Monetbil).
     const [consigneFournisseur, setConsigneFournisseur] = useState<string | null>(null);
+    // Code USSD a composer quand la demande n'arrive pas (*126# chez MTN Cameroun, #120# chez Orange CI).
+    const [codeUssd, setCodeUssd] = useState<string | null>(null);
+    /**
+     * Consigne et code de secours de l'operateur, apres une demande de paiement. Quand
+     * une demande attend deja sur ce telephone (`dejaEnvoye`), le serveur n'en a pas
+     * envoye d'autre : on le dit, avec la consigne de la demande en cours.
+     */
+    const appliquerConsigne = (response: any) => {
+        const consigne = typeof response?.rawData?._instructions === 'string' && response.rawData._instructions ? response.rawData._instructions : null;
+        if (response?.dejaEnvoye) setConsigneFournisseur([tr("demande_deja_envoyee"), consigne].filter(Boolean).join(" "));
+        else if (consigne) setConsigneFournisseur(consigne);
+        if (typeof response?.rawData?._ussd === 'string' && response.rawData._ussd) setCodeUssd(response.rawData._ussd);
+    };
     const [otpCode, setOtpCode] = useState("");
 
     const sessionMinsLeft = Math.floor(sessionSecondsLeft / 60);
@@ -990,6 +1075,7 @@ export default function CheckoutPage() {
         setLienApplication(null);
         setModeTestAttente(false);
         setConsigneFournisseur(null);
+        setCodeUssd(null);
         if (needsPhone) setPaymentInstructions(getInstructions(selectedMethod));
         try {
             const fullPhone = needsPhone
@@ -1010,6 +1096,14 @@ export default function CheckoutPage() {
             });
 
             if (response.sandbox) { setModeTestAttente(true); setPaymentStatus('pending_user'); return; }
+            if (response.indisponible) {
+                // Indisponible partout (sante des moyens) : le moyen se grise ici aussi.
+                const cleChoisie = selectedMethod?.cle;
+                setMethods((prev) => prev.map((m: any) => ((cleChoisie && m.cle === cleChoisie) || m.id === selectedMethod?.id ? { ...m, indisponible: true } : m)));
+                setPaymentStatus(null);
+                setDernierEchec(tr("moyen_indisponible", { moyen: nomCourt(selectedMethod?.name || response.moyen || "") }));
+                return;
+            }
             if (!response.success) { setPaymentStatus(null); setDernierEchec(messageAcheteur(response.message, langue, tr("echec_paiement"))); return; }
 
             // Carte : on reste ici, le formulaire de Stripe se monte sous le choix.
@@ -1029,7 +1123,7 @@ export default function CheckoutPage() {
                 setPaymentStatus('pending_user');
                 return;
             }
-            if (typeof response.rawData?._instructions === 'string' && response.rawData._instructions) setConsigneFournisseur(response.rawData._instructions);
+            appliquerConsigne(response);
 
             // Provider returns a hosted checkout URL → redirect immediately
             if ((response.status === 'REDIRECT' || response.redirectUrl) && response.redirectUrl) {
@@ -1170,9 +1264,17 @@ export default function CheckoutPage() {
                 customerDetails: { name: transaction.customerName, email: transaction.customerEmail, phone: parsePhoneNumberFromString(expressProfile.phone, expressProfile.countryCode as any)?.number || expressProfile.phone, country: expressProfile.countryCode }
             });
             if (response.sandbox) { setModeTestAttente(true); setPaymentStatus('pending_user'); return; }
+            if (response.indisponible) {
+                // Indisponible partout (sante des moyens) : le moyen se grise ici aussi.
+                const cleChoisie = selectedMethod?.cle;
+                setMethods((prev) => prev.map((m: any) => ((cleChoisie && m.cle === cleChoisie) || m.id === selectedMethod?.id ? { ...m, indisponible: true } : m)));
+                setPaymentStatus(null);
+                setDernierEchec(tr("moyen_indisponible", { moyen: nomCourt(selectedMethod?.name || response.moyen || "") }));
+                return;
+            }
             if (!response.success) { setPaymentStatus(null); setDernierEchec(messageAcheteur(response.message, langue, tr("echec_paiement"))); return; }
             if (response.status === 'APP_LINK' && response.redirectUrl) { setLienApplication({ url: response.redirectUrl, nom: response.application || tr("l_application"), qr: response.qr || null }); setPaymentStatus('pending_user'); return; }
-            if (typeof response.rawData?._instructions === 'string' && response.rawData._instructions) setConsigneFournisseur(response.rawData._instructions);
+            appliquerConsigne(response);
             if ((response.status === 'REDIRECT' || response.redirectUrl) && response.redirectUrl) { setPaymentStatus('verifying'); redirectViaParent(response.redirectUrl); return; }
             if (response.status === 'SUCCESS') {
                 setPaymentStatus('success');
@@ -1249,6 +1351,7 @@ export default function CheckoutPage() {
                     else { redirectViaParent(attente.url); return; }
                 }
                 if (tx?.status === 'PENDING' && attente?.type === 'ussd' && attente.message) setConsigneFournisseur(attente.message);
+                if (tx?.status === 'PENDING' && attente?.type === 'ussd' && attente.ussdCode) setCodeUssd(attente.ussdCode);
                 if (tx?.status === 'SUCCESS') {
                     setTransaction(tx);
                     setPaymentStatus('success');
@@ -1294,7 +1397,7 @@ export default function CheckoutPage() {
     if (isLoading) {
         const os = (w: string, h = 12) => <div className="animate-pulse rounded-md" style={{ width: w, height: h, background: checkoutTheme.methodHoverBg }} />;
         return (
-            <Coque theme={checkoutTheme} langue={langue} gauche={
+            <Coque theme={checkoutTheme} langue={langue} style={style} gauche={
                 <div className="flex flex-col gap-4 lg:gap-6">
                     <div className="flex items-center gap-3"><div className="h-11 w-11 animate-pulse rounded-full" style={{ background: checkoutTheme.methodHoverBg }} />{os('120px', 14)}</div>
                     {os('90px')}{os('200px', 40)}
@@ -1312,7 +1415,7 @@ export default function CheckoutPage() {
 
     if (!transaction && erreurChargement) {
         return (
-            <Coque theme={checkoutTheme} langue={langue} gauche={
+            <Coque theme={checkoutTheme} langue={langue} style={style} gauche={
                 <div className="hidden lg:block">
                     <p className="text-[13px]" style={{ color: checkoutTheme.textMuted }}>{MARQUE}</p>
                     <p className="mt-2 text-[28px] leading-tight" style={{ color: checkoutTheme.textPrimary }}>{tr("suivi_paiement")}</p>
@@ -1328,7 +1431,7 @@ export default function CheckoutPage() {
 
     if (!transaction) {
         return (
-            <Coque theme={checkoutTheme} langue={langue} gauche={
+            <Coque theme={checkoutTheme} langue={langue} style={style} gauche={
                 <div className="hidden lg:block">
                     <p className="text-[13px]" style={{ color: checkoutTheme.textMuted }}>{MARQUE}</p>
                     <p className="mt-2 text-[28px] leading-tight" style={{ color: checkoutTheme.textPrimary }}>{tr("lien_nulle_part")}</p>
@@ -1344,8 +1447,14 @@ export default function CheckoutPage() {
     }
 
     const baseCurrency = (transaction.currency || 'XOF').toUpperCase();
-    const displayCurrency = (selectedCountry.currency || COUNTRY_CURRENCY_MAP[selectedCountryCode] || baseCurrency).toUpperCase();
-    const convertedAmount = convertAmount(Number(transaction.amount), baseCurrency, displayCurrency);
+    /**
+     * La devise montree est celle que le serveur debitera (/api/checkout/initiate) :
+     * celle du moyen choisi, sinon celle du pays, sinon celle du paiement. Un pays
+     * hors de la table (Canada, Belgique, Maroc...) garde la devise du paiement :
+     * avant, il voyait un montant converti en XOF qu'on ne lui prenait pas (04/10/2026).
+     */
+    const displayCurrency = (deviseDuMoyen(selectedMethod?.code) || DEVISE_PAYS_CHECKOUT[selectedCountryCode] || baseCurrency).toUpperCase();
+    const convertedAmount = convertirAvecTaux(Number(transaction.amount), baseCurrency, displayCurrency, taux);
     const isCurrencyConverted = displayCurrency !== baseCurrency;
     const formattedAmount = new Intl.NumberFormat(localeNombre(langue)).format(convertedAmount);
     /**
@@ -1376,7 +1485,11 @@ export default function CheckoutPage() {
     const successUrl = urlSure(meta.success_url);
     const titrePaiement = (transaction as any).description || meta.description || meta.title || tr("paiement_a", { nom: marchand.nom });
     const logosMoyens = Array.from(new Set(methods.map((m: any) => m.logo).filter(Boolean))) as string[];
-    const methodesUniques = filteredMethods.filter((m, i, arr) => arr.findIndex((x) => (x.logo || x.name) === (m.logo || m.name)) === i);
+    // Un meme operateur servi par plusieurs passerelles ne s'affiche qu'une fois. Le logo seul
+    // ne suffit pas : un logo generique (momo.svg) ou faux cachait un autre operateur
+    // (Flooz derriere T-Money au Togo, Express Union ou Zamtel derriere MTN).
+    const cleMoyen = (m: any) => `${m.logo || m.name}|${getOperatorKey(m.name || "")}`;
+    const methodesUniques = filteredMethods.filter((m, i, arr) => arr.findIndex((x) => cleMoyen(x) === cleMoyen(m)) === i);
     const methodesVisibles = toutesMethodes || methodesUniques.length <= 6 ? methodesUniques : methodesUniques.slice(0, 6);
     const lignesResume = [
         ...(transaction.customerEmail ? [{ label: tr("recu_envoye_a"), valeur: String(transaction.customerEmail) }] : []),
@@ -1398,8 +1511,155 @@ export default function CheckoutPage() {
         </div>
     );
 
+    /**
+     * Ce que le moyen choisi demande encore : le numero mobile money (avec
+     * son pays), ou le pays seul et l'avis de redirection. Sous la liste des
+     * moyens dans les styles classique et boutique, DANS la ligne du moyen
+     * choisi dans le style cartes.
+     */
+    /** La liste des pays, ouverte par le choix du pays en tete du formulaire ou par l'indicatif du champ telephone. */
+    const listePays = (
+        <>
+                            {/* Liste des pays, partagee par le champ telephone et la ligne ci-dessus */}
+                            <AnimatePresence>
+                                {showCountryPicker && (
+                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                                        className="mt-2 overflow-hidden rounded-xl" style={{ border: `1px solid ${checkoutTheme.divider}`, background: checkoutTheme.cardBg }}>
+                                        <div className="p-2">
+                                            <div className="relative mb-2">
+                                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: checkoutTheme.textMuted }} />
+                                                <input placeholder={tr("pays_ou_indicatif")} value={searchCountry} onChange={e => { resetSessionTimer(); setSearchCountry(e.target.value); }} autoFocus
+                                                    className="h-9 w-full rounded-lg pl-9 pr-3 outline-none" style={champStyle(checkoutTheme)} />
+                                            </div>
+                                            <div className="max-h-[200px] overflow-y-auto">
+                                                {filteredCountries.map(c => (
+                                                    <button key={c.code} type="button" onClick={() => { resetSessionTimer(); setSelectedCountryCode(c.code); setShowCountryPicker(false); }}
+                                                        className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left transition-colors"
+                                                        style={{ background: c.code === selectedCountryCode ? checkoutTheme.methodSelectedBg : 'transparent' }}
+                                                        onMouseEnter={e => { if (c.code !== selectedCountryCode) (e.currentTarget as HTMLButtonElement).style.background = checkoutTheme.methodHoverBg; }}
+                                                        onMouseLeave={e => { if (c.code !== selectedCountryCode) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}>
+                                                        <Drapeau code={c.code} taille={14} />
+                                                        <span className="flex-1 text-[13px]" style={{ color: checkoutTheme.textPrimary }}>{nomPays(c.code, langue, c.name)}</span>
+                                                        <span className="text-[12px] tabular-nums" style={{ color: checkoutTheme.textMuted }}>{c.dial_code}</span>
+                                                        {c.code === selectedCountryCode && <Check size={13} style={{ color: checkoutTheme.methodSelectedBorder }} />}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+        </>
+    );
+    const blocDetails = (
+        <>
+                            {/* Telephone Mobile Money */}
+                            {needsPhone && (
+                                <div>
+                                    <Etiquette theme={checkoutTheme}>{tr("numero_moyen", { moyen: selectedMethod ? nomCourt(selectedMethod.name) : tr("mobile_money") })}</Etiquette>
+                                    <div className="flex h-12 items-stretch overflow-hidden rounded-xl" style={{ background: checkoutTheme.methodHoverBg, border: `1px solid ${phoneError ? '#ef4444' : checkoutTheme.methodBorder}` }}>
+                                        {/* L'indicatif suit le pays choisi en tete du formulaire : un seul endroit pour en changer. */}
+                                        <span className="flex shrink-0 items-center gap-1.5 px-3" style={{ borderRight: `1px solid ${checkoutTheme.methodBorder}` }}>
+                                            <Drapeau code={selectedCountry.code} taille={14} />
+                                            <span className="text-[13px] font-medium" style={{ color: checkoutTheme.textPrimary }}>{selectedCountry.dial_code}</span>
+                                        </span>
+                                        <div className="relative flex-1">
+                                            <input value={phoneNumber} onChange={(e) => {
+                                                resetSessionTimer();
+                                                // Nettoyage AVANT la limite de longueur : l'autocompletion
+                                                // livre le numero complet ("+225 01 02 03 04 05") alors que
+                                                // l'indicatif est deja affiche a gauche du champ.
+                                                let val = e.target.value.replace(/\D/g, '');
+                                                const dialRaw = (selectedCountry.dial_code || '').replace('+', '');
+                                                if (dialRaw) {
+                                                    // "00225..." ou "225..." : on retire l'indicatif, au besoin
+                                                    // deux fois si le navigateur l'a colle sur celui du champ.
+                                                    val = val.replace(/^00/, '');
+                                                    while (val.startsWith(dialRaw) && val.length > dialRaw.length) {
+                                                        val = val.slice(dialRaw.length);
+                                                    }
+                                                }
+                                                val = val.slice(0, getPhoneFormat(selectedCountryCode).maxLen);
+                                                setPhoneNumber(val);
+                                                setPhoneError('');
+                                            }} onBlur={() => { if (phoneNumber) { const complet = completerBenin(phoneNumber.replace(/\D/g, ''), selectedCountryCode); if (complet !== phoneNumber) setPhoneNumber(complet); const validation = validatePhoneNumber(complet, selectedCountryCode); setPhoneError(validation.error); } }} placeholder={getPhoneFormat(selectedCountryCode).placeholder} maxLength={getPhoneFormat(selectedCountryCode).maxLen + 10} type="tel" inputMode="numeric" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                                                className="h-full w-full bg-transparent px-3.5 pr-9 font-medium outline-none" style={{ color: checkoutTheme.textPrimary, fontSize: 16 }} />
+                                            {identityLoading && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin" style={{ color: checkoutTheme.textMuted }} />}
+                                            {identityProfile && !identityLoading && <CheckCircle2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: checkoutTheme.methodSelectedBorder }} />}
+                                        </div>
+                                    </div>
+                                    {phoneError ? (
+                                        <p className="mt-1.5 flex items-center gap-1.5 text-[12px]" style={{ color: '#ef4444' }}><X size={12} />{phoneError}</p>
+                                    ) : identityMode && identityProfile ? (
+                                        /* Payeur reconnu (identite Cartflox) : une ligne discrete a la
+                                           place de l'aide, sous le numero qui l'a fait reconnaitre. */
+                                        <motion.p key="bon-retour" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1.5 truncate text-[11.5px]" style={{ color: checkoutTheme.textMuted }}>
+                                            <span className="font-medium" style={{ color: checkoutTheme.textSecondary }}>{tr("bon_retour")}{identityProfile.name ? `, ${identityProfile.name.split(' ')[0]}` : ''}.</span>
+                                            {identityProfile.totalPayments > 0 && <> {tr(identityProfile.totalPayments > 1 ? "paiements_reussis_plusieurs" : "paiements_reussis_un", { n: identityProfile.totalPayments })}</>}
+                                        </motion.p>
+                                    ) : (
+                                        <p className="mt-1.5 text-[11.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("numero_recevra")}</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Redirection vers la page de l'agregateur. La carte Stripe
+                                en est exclue : elle se remplit ici, promettre une page
+                                exterieure serait desormais faux. */}
+                            {!needsPhone && !carteStripe && !paiementCarte && selectedMethod && (
+                                <div className="flex items-center gap-3 rounded-xl px-3.5 py-3" style={{ background: checkoutTheme.secureBadgeBg }}>
+                                    <span className="grid h-8 w-8 shrink-0 place-content-center rounded-full" style={{ background: checkoutTheme.cardBg, color: checkoutTheme.secureBadgeText }}><Globe size={15} /></span>
+                                    <p className="text-[12.5px] leading-snug" style={{ color: checkoutTheme.secureBadgeText }}>
+                                        {/(wave business|djamo)/i.test(selectedMethod.gateway || "")
+                                            ? tr("confirmerez_application", { app: /djamo/i.test(selectedMethod.gateway || "") ? "Djamo" : "Wave" })
+                                            : tr("finaliserez_page", { passerelle: selectedMethod.gateway || selectedMethod.name })}
+                                    </p>
+                                </div>
+                            )}
+
+        </>
+    );
+    /** Le bouton Payer suit le style : plus haut et plus rond dans les cartes. */
+    const styleBouton: React.CSSProperties | undefined = style === "cartes" ? { height: 56, borderRadius: 16, fontSize: 16 } : (style === "boutique" || style === "express") ? { height: 52, borderRadius: 12 } : undefined;
+    /** Choisir un moyen, sauf s'il est grise (indisponible partout pour le moment). */
+    const choisirMoyen = (m: any) => { if (m?.indisponible) return; resetSessionTimer(); setSelectedMethod(m); };
+    /** Une ligne de moyen qui s'ouvre sur place (styles cartes et express) : cercle, nom, logo, et le detail dedans. */
+    const ligneAccordeon = (m: any, couleurChoix: string) => {
+        const metaM = getMethodMeta(m.name);
+        const isSelected = selectedMethod?.id === m.id;
+        const isPreferred = identityProfile?.preferredMethod && (m.code?.toLowerCase() === identityProfile.preferredMethod.toLowerCase() || m.name?.toLowerCase().includes(identityProfile.preferredMethod.toLowerCase()));
+        return (
+            <div key={m.id} className="overflow-hidden rounded-2xl transition-colors" style={{ background: checkoutTheme.cardBg, border: `2px solid ${isSelected ? couleurChoix : checkoutTheme.methodBorder}` }}>
+                <button type="button" role="radio" aria-checked={isSelected} aria-disabled={m.indisponible ? true : undefined} disabled={!!m.indisponible} title={m.indisponible ? etiquetteIndisponible(m) : undefined} onClick={() => choisirMoyen(m)} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+                    <span className="grid h-[22px] w-[22px] shrink-0 place-content-center rounded-full" style={{ border: `2px solid ${isSelected ? couleurChoix : checkoutTheme.methodBorder}` }}>
+                        {isSelected && <span className="h-2.5 w-2.5 rounded-full" style={{ background: couleurChoix }} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-semibold leading-tight" style={{ color: checkoutTheme.textPrimary }}>{nomCourt(m.name)}</span>
+                        {isPreferred && <span className="block text-[11px]" style={{ color: checkoutTheme.textMuted }}>{tr("prefere")}</span>}
+                        {m.indisponible && <span className="block text-[11.5px]" style={{ color: checkoutTheme.textMuted }}>{etiquetteIndisponible(m)}</span>}
+                    </span>
+                    <span className="grid h-9 w-14 shrink-0 place-content-center rounded-lg" style={{ background: checkoutTheme.methodHoverBg }}>
+                        {m.logo ? <img src={m.logo} alt="" className="h-6 w-6 object-contain" /> : <span className="text-[10px] font-bold" style={{ color: metaM.color }}>{metaM.abbr}</span>}
+                    </span>
+                </button>
+                {isSelected && <div className="flex flex-col gap-4 px-4 pb-4">{blocDetails}</div>}
+            </div>
+        );
+    };
+    /** Style express : les trois premiers moyens en gros boutons de couleur, les autres en dessous. */
+    const expressMoyens = methodesVisibles.slice(0, 3);
+    const autresMoyens = methodesVisibles.slice(3);
+    const expressIds = new Set(expressMoyens.map((m) => m.id));
+    const encreSur = (couleur: string) => {
+        const h = couleur.replace('#', '');
+        if (h.length !== 6) return '#ffffff';
+        const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? '#111114' : '#ffffff';
+    };
+
     return (
-        <Coque theme={checkoutTheme} langue={langue} test={meta.testMode === true || enTest} gauche={
+        <Coque theme={checkoutTheme} langue={langue} style={style} etape={checkoutStep === 'success' ? 3 : 2} test={meta.testMode === true || enTest} gauche={
             <PanneauMarchand theme={checkoutTheme} marchand={marchand} retourUrl={retourUrl}
                 titre={titrePaiement} montant={formattedAmount} devise={displayCurrency} etiquette={tr("montant_a_payer")}
                 sousMontant={isCurrencyConverted && formattedOriginalAmount ? tr("soit_environ", { montant: formattedOriginalAmount, devise: baseCurrency }) : null}
@@ -1432,10 +1692,12 @@ export default function CheckoutPage() {
                 {/* ═══ ETAPE : FORMULAIRE ═══ */}
                 {checkoutStep === 'form' && (
                     <motion.div key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+                        {/* Moyens grises (sante des moyens) : un seul style pour les quatre rendus. */}
+                        <style>{`button[role="radio"][aria-disabled="true"]{opacity:.45;cursor:not-allowed;filter:grayscale(1)}`}</style>
                         <div className="flex flex-col gap-5 px-6 pt-6 pb-2">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
-                                    <h1 className="text-[18px] font-semibold tracking-tight" style={{ color: checkoutTheme.textPrimary }}>{tr("moyen_de_paiement")}</h1>
+                                    <h1 className={style === "cartes" ? "text-[22px] font-bold tracking-tight" : (style === "boutique" || style === "express") ? "text-[22px] font-semibold tracking-tight" : "text-[18px] font-semibold tracking-tight"} style={{ color: checkoutTheme.textPrimary }}>{tr("moyen_de_paiement")}</h1>
                                     <p className="mt-0.5 text-[12.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("choisissez_comment_payer", { montant: formattedAmount, devise: displayCurrency })}</p>
                                 </div>
                                 {selecteurLangue}
@@ -1474,6 +1736,22 @@ export default function CheckoutPage() {
                                 </motion.div>
                             )}
 
+                            {/* Pays du client, en clair : il decide des moyens proposes et de
+                                l'indicatif du champ telephone. La liste s'ouvre juste dessous. */}
+                            <div>
+                                <Etiquette theme={checkoutTheme} droite={<span className="text-[11.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("pays_aide")}</span>}>
+                                    {tr("pays")}
+                                </Etiquette>
+                                <button type="button" onClick={() => { resetSessionTimer(); setShowCountryPicker(!showCountryPicker); }} aria-expanded={showCountryPicker} aria-label={tr("changer_pays")}
+                                    className="flex h-12 w-full items-center gap-2.5 rounded-xl px-3.5 text-left transition-colors" style={champStyle(checkoutTheme)}>
+                                    <Drapeau code={selectedCountry.code} taille={16} />
+                                    <span className="flex-1 truncate text-[14px] font-medium" style={{ color: checkoutTheme.textPrimary }}>{nomPays(selectedCountry.code, langue, selectedCountry.name)}</span>
+                                    <span className="text-[12.5px] tabular-nums" style={{ color: checkoutTheme.textMuted }}>{selectedCountry.dial_code}</span>
+                                    <ChevronDown size={14} className={`transition-transform ${showCountryPicker ? "rotate-180" : ""}`} style={{ color: checkoutTheme.textMuted }} />
+                                </button>
+                                {listePays}
+                            </div>
+
                             {/* Moyens de paiement */}
                             <div>
                                 <Etiquette theme={checkoutTheme} droite={identityProfile?.preferredMethod ? <span className="inline-flex items-center gap-1 text-[11px] font-medium" style={{ color: checkoutTheme.textMuted }}><Star size={10} /> {tr("votre_habitude")}</span> : undefined}>
@@ -1483,14 +1761,60 @@ export default function CheckoutPage() {
                                     <div className="rounded-xl px-4 py-6 text-center text-[13px]" style={{ background: checkoutTheme.methodHoverBg, color: checkoutTheme.textMuted }}>
                                         {tr("aucun_moyen_pays", { pays: nomPays(selectedCountry.code, langue, selectedCountry.name) })}
                                     </div>
+                                ) : style === "express" ? (
+                                    <div className="flex flex-col gap-4">
+                                        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={tr("moyen_de_paiement")}>
+                                            {expressMoyens.map((m) => {
+                                                const couleur = getMethodMeta(m.name).color;
+                                                const isSelected = selectedMethod?.id === m.id;
+                                                return (
+                                                    <button key={m.id} type="button" role="radio" aria-checked={isSelected} aria-disabled={m.indisponible ? true : undefined} disabled={!!m.indisponible} title={m.indisponible ? etiquetteIndisponible(m) : undefined} onClick={() => choisirMoyen(m)}
+                                                        className="flex h-[52px] items-center justify-center gap-2 rounded-xl px-3 text-[14px] font-semibold transition-all"
+                                                        style={{ background: couleur, color: encreSur(couleur), boxShadow: isSelected ? `0 0 0 2px ${checkoutTheme.cardBg}, 0 0 0 4px ${checkoutTheme.textPrimary}` : 'none' }}>
+                                                        {m.logo && <span className="grid h-6 w-6 shrink-0 place-content-center overflow-hidden rounded-full" style={{ background: '#fff' }}><img src={m.logo} alt="" className="h-4 w-4 object-contain" /></span>}
+                                                        <span className="truncate">{nomCourt(m.name)}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        {selectedMethod && expressIds.has(selectedMethod.id) && (
+                                            <div className="flex flex-col gap-4 rounded-xl p-4" style={{ border: `1px solid ${checkoutTheme.methodBorder}` }}>{blocDetails}</div>
+                                        )}
+                                        {autresMoyens.length > 0 && (
+                                            <>
+                                                <div className="flex items-center gap-3 text-[13px]" style={{ color: checkoutTheme.textMuted }}>
+                                                    <span className="h-px flex-1" style={{ background: checkoutTheme.divider }} />{tr("ou_autrement")}<span className="h-px flex-1" style={{ background: checkoutTheme.divider }} />
+                                                </div>
+                                                <div className="flex flex-col gap-2.5" role="radiogroup" aria-label={tr("moyen_de_paiement")}>
+                                                    {autresMoyens.map((m) => ligneAccordeon(m, checkoutTheme.methodSelectedBorder))}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
                                 ) : (
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label={tr("moyen_de_paiement")}>
+                                    <div className={style === "cartes" ? "flex flex-col gap-2.5" : style === "boutique" ? "grid grid-cols-2 gap-2 sm:grid-cols-3" : "grid grid-cols-1 gap-2 sm:grid-cols-2"} role="radiogroup" aria-label={tr("moyen_de_paiement")}>
                                         {methodesVisibles.map((m) => {
                                             const metaM = getMethodMeta(m.name);
                                             const isSelected = selectedMethod?.id === m.id;
                                             const isPreferred = identityProfile?.preferredMethod && (m.code?.toLowerCase() === identityProfile.preferredMethod.toLowerCase() || m.name?.toLowerCase().includes(identityProfile.preferredMethod.toLowerCase()));
+                                            const choisir = () => choisirMoyen(m);
+                                            if (style === "cartes") return ligneAccordeon(m, checkoutTheme.textPrimary);
+                                            // Style boutique : une tuile compacte, logo au-dessus du nom, bord sombre sur la choisie.
+                                            if (style === "boutique") return (
+                                                <button key={m.id} type="button" role="radio" aria-checked={isSelected} aria-disabled={m.indisponible ? true : undefined} disabled={!!m.indisponible} title={m.indisponible ? etiquetteIndisponible(m) : undefined} onClick={choisir}
+                                                    className="flex min-w-0 flex-col items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors"
+                                                    style={{ background: isSelected ? checkoutTheme.methodSelectedBg : 'transparent', border: `1.5px solid ${isSelected ? checkoutTheme.textPrimary : checkoutTheme.methodBorder}` }}>
+                                                    <span className="grid h-7 w-7 place-content-center overflow-hidden rounded-md" style={{ background: '#fff', border: `1px solid ${checkoutTheme.divider}` }}>
+                                                        {m.logo ? <img src={m.logo} alt="" className="h-[18px] w-[18px] object-contain" /> : <span className="text-[9px] font-bold" style={{ color: metaM.color }}>{metaM.abbr}</span>}
+                                                    </span>
+                                                    <span className="min-w-0 w-full">
+                                                        <span className="block truncate text-[13px] font-medium leading-tight" style={{ color: checkoutTheme.textPrimary }}>{nomCourt(m.name)}</span>
+                                                        {isPreferred && <span className="block text-[10.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("prefere")}</span>}{m.indisponible && <span className="block text-[10.5px]" style={{ color: checkoutTheme.textMuted }}>{etiquetteIndisponible(m)}</span>}
+                                                    </span>
+                                                </button>
+                                            );
                                             return (
-                                                <button key={m.id} type="button" role="radio" aria-checked={isSelected} onClick={() => { resetSessionTimer(); setSelectedMethod(m); }}
+                                                <button key={m.id} type="button" role="radio" aria-checked={isSelected} aria-disabled={m.indisponible ? true : undefined} disabled={!!m.indisponible} title={m.indisponible ? etiquetteIndisponible(m) : undefined} onClick={() => choisirMoyen(m)}
                                                     className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors"
                                                     style={{ background: isSelected ? checkoutTheme.methodSelectedBg : 'transparent', border: `1.5px solid ${isSelected ? checkoutTheme.methodSelectedBorder : checkoutTheme.methodBorder}` }}>
                                                     <span className="grid h-8 w-8 shrink-0 place-content-center overflow-hidden rounded-full" style={{ background: '#fff', border: `1px solid ${checkoutTheme.divider}` }}>
@@ -1498,7 +1822,7 @@ export default function CheckoutPage() {
                                                     </span>
                                                     <span className="min-w-0 flex-1">
                                                         <span className="block truncate text-[13px] font-medium leading-tight" style={{ color: checkoutTheme.textPrimary }}>{nomCourt(m.name)}</span>
-                                                        {isPreferred && <span className="block text-[10.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("prefere")}</span>}
+                                                        {isPreferred && <span className="block text-[10.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("prefere")}</span>}{m.indisponible && <span className="block text-[10.5px]" style={{ color: checkoutTheme.textMuted }}>{etiquetteIndisponible(m)}</span>}
                                                     </span>
                                                     <span className="grid h-[18px] w-[18px] shrink-0 place-content-center rounded-full" style={{ border: `1.5px solid ${isSelected ? checkoutTheme.methodSelectedBorder : checkoutTheme.methodBorder}`, background: isSelected ? checkoutTheme.methodSelectedBorder : 'transparent' }}>
                                                         {isSelected && <Check size={11} strokeWidth={3} style={{ color: checkoutTheme.accentText }} />}
@@ -1515,122 +1839,7 @@ export default function CheckoutPage() {
                                 )}
                             </div>
 
-                            {/* Telephone Mobile Money */}
-                            {needsPhone && (
-                                <div>
-                                    <Etiquette theme={checkoutTheme}>{tr("numero_moyen", { moyen: selectedMethod ? nomCourt(selectedMethod.name) : tr("mobile_money") })}</Etiquette>
-                                    <div className="flex h-12 items-stretch overflow-hidden rounded-xl" style={{ background: checkoutTheme.methodHoverBg, border: `1px solid ${phoneError ? '#ef4444' : checkoutTheme.methodBorder}` }}>
-                                        <button type="button" onClick={() => setShowCountryPicker(!showCountryPicker)} aria-label={tr("changer_pays")}
-                                            className="flex shrink-0 items-center gap-1.5 px-3 transition-colors" style={{ borderRight: `1px solid ${checkoutTheme.methodBorder}` }}>
-                                            <Drapeau code={selectedCountry.code} taille={14} />
-                                            <span className="text-[13px] font-medium" style={{ color: checkoutTheme.textPrimary }}>{selectedCountry.dial_code}</span>
-                                            <ChevronDown size={12} style={{ color: checkoutTheme.textMuted }} />
-                                        </button>
-                                        <div className="relative flex-1">
-                                            <input value={phoneNumber} onChange={(e) => {
-                                                resetSessionTimer();
-                                                // Nettoyage AVANT la limite de longueur : l'autocompletion
-                                                // livre le numero complet ("+225 07 03 32 46 74") alors que
-                                                // l'indicatif est deja affiche a gauche du champ.
-                                                let val = e.target.value.replace(/\D/g, '');
-                                                const dialRaw = (selectedCountry.dial_code || '').replace('+', '');
-                                                if (dialRaw) {
-                                                    // "00225..." ou "225..." : on retire l'indicatif, au besoin
-                                                    // deux fois si le navigateur l'a colle sur celui du champ.
-                                                    val = val.replace(/^00/, '');
-                                                    while (val.startsWith(dialRaw) && val.length > dialRaw.length) {
-                                                        val = val.slice(dialRaw.length);
-                                                    }
-                                                }
-                                                val = val.slice(0, getPhoneFormat(selectedCountryCode).maxLen);
-                                                setPhoneNumber(val);
-                                                setPhoneError('');
-                                            }} onBlur={() => { if (phoneNumber) { const complet = completerBenin(phoneNumber.replace(/\D/g, ''), selectedCountryCode); if (complet !== phoneNumber) setPhoneNumber(complet); const validation = validatePhoneNumber(complet, selectedCountryCode); setPhoneError(validation.error); } }} placeholder={getPhoneFormat(selectedCountryCode).placeholder} maxLength={getPhoneFormat(selectedCountryCode).maxLen + 10} type="tel" inputMode="numeric" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                                                className="h-full w-full bg-transparent px-3.5 pr-9 font-medium outline-none" style={{ color: checkoutTheme.textPrimary, fontSize: 16 }} />
-                                            {identityLoading && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin" style={{ color: checkoutTheme.textMuted }} />}
-                                            {identityProfile && !identityLoading && <CheckCircle2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: checkoutTheme.methodSelectedBorder }} />}
-                                        </div>
-                                    </div>
-                                    {phoneError ? (
-                                        <p className="mt-1.5 flex items-center gap-1.5 text-[12px]" style={{ color: '#ef4444' }}><X size={12} />{phoneError}</p>
-                                    ) : (
-                                        <p className="mt-1.5 text-[11.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("numero_recevra")}</p>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Pays du client : toujours modifiable, meme quand seule la carte est proposee */}
-                            {!needsPhone && (
-                                <div className="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5" style={{ border: `1px solid ${checkoutTheme.methodBorder}`, background: checkoutTheme.methodHoverBg }}>
-                                    <span className="flex min-w-0 items-center gap-2 text-[13px]">
-                                        <Drapeau code={selectedCountry.code} taille={14} />
-                                        <span className="truncate font-medium" style={{ color: checkoutTheme.textPrimary }}>{nomPays(selectedCountry.code, langue, selectedCountry.name)}</span>
-                                        <span className="shrink-0" style={{ color: checkoutTheme.textMuted }}>{selectedCountry.dial_code}</span>
-                                    </span>
-                                    <button type="button" onClick={() => { resetSessionTimer(); setShowCountryPicker(!showCountryPicker); }} className="shrink-0 text-[12.5px] font-medium underline-offset-2 hover:underline" style={{ color: checkoutTheme.textSecondary }}>{tr("changer_pays")}</button>
-                                </div>
-                            )}
-
-                            {/* Redirection vers la page de l'agregateur. La carte Stripe
-                                en est exclue : elle se remplit ici, promettre une page
-                                exterieure serait desormais faux. */}
-                            {!needsPhone && !carteStripe && !paiementCarte && selectedMethod && (
-                                <div className="flex items-center gap-3 rounded-xl px-3.5 py-3" style={{ background: checkoutTheme.secureBadgeBg }}>
-                                    <span className="grid h-8 w-8 shrink-0 place-content-center rounded-full" style={{ background: checkoutTheme.cardBg, color: checkoutTheme.secureBadgeText }}><Globe size={15} /></span>
-                                    <p className="text-[12.5px] leading-snug" style={{ color: checkoutTheme.secureBadgeText }}>
-                                        {/(wave business|djamo)/i.test(selectedMethod.gateway || "")
-                                            ? tr("confirmerez_application", { app: /djamo/i.test(selectedMethod.gateway || "") ? "Djamo" : "Wave" })
-                                            : tr("finaliserez_page", { passerelle: selectedMethod.gateway || selectedMethod.name })}
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Liste des pays, partagee par le champ telephone et la ligne ci-dessus */}
-                            <AnimatePresence>
-                                {showCountryPicker && (
-                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                                        className="mt-2 overflow-hidden rounded-xl" style={{ border: `1px solid ${checkoutTheme.divider}`, background: checkoutTheme.cardBg }}>
-                                        <div className="p-2">
-                                            <div className="relative mb-2">
-                                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: checkoutTheme.textMuted }} />
-                                                <input placeholder={tr("pays_ou_indicatif")} value={searchCountry} onChange={e => { resetSessionTimer(); setSearchCountry(e.target.value); }} autoFocus
-                                                    className="h-9 w-full rounded-lg pl-9 pr-3 outline-none" style={champStyle(checkoutTheme)} />
-                                            </div>
-                                            <div className="max-h-[200px] overflow-y-auto">
-                                                {filteredCountries.map(c => (
-                                                    <button key={c.code} type="button" onClick={() => { resetSessionTimer(); setSelectedCountryCode(c.code); setShowCountryPicker(false); }}
-                                                        className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left transition-colors"
-                                                        style={{ background: c.code === selectedCountryCode ? checkoutTheme.methodSelectedBg : 'transparent' }}
-                                                        onMouseEnter={e => { if (c.code !== selectedCountryCode) (e.currentTarget as HTMLButtonElement).style.background = checkoutTheme.methodHoverBg; }}
-                                                        onMouseLeave={e => { if (c.code !== selectedCountryCode) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}>
-                                                        <Drapeau code={c.code} taille={14} />
-                                                        <span className="flex-1 text-[13px]" style={{ color: checkoutTheme.textPrimary }}>{nomPays(c.code, langue, c.name)}</span>
-                                                        <span className="text-[12px] tabular-nums" style={{ color: checkoutTheme.textMuted }}>{c.dial_code}</span>
-                                                        {c.code === selectedCountryCode && <Check size={13} style={{ color: checkoutTheme.methodSelectedBorder }} />}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-
-                            {/* Payeur reconnu (identite Cartflox) */}
-                            <AnimatePresence>
-                                {identityMode && identityProfile && (
-                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-                                        <div className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5" style={{ background: checkoutTheme.methodHoverBg, border: `1px solid ${checkoutTheme.divider}` }}>
-                                            <span className="grid h-8 w-8 shrink-0 place-content-center rounded-full" style={{ background: checkoutTheme.accent, color: checkoutTheme.accentText }}>
-                                                {identityProfile.isVerified ? <CheckCircle2 size={14} /> : <User size={14} />}
-                                            </span>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="truncate text-[12.5px] font-semibold" style={{ color: checkoutTheme.textPrimary }}>{tr("bon_retour")}{identityProfile.name ? `, ${identityProfile.name.split(' ')[0]}` : ''}</p>
-                                                <p className="text-[11px]" style={{ color: checkoutTheme.textMuted }}>{identityProfile.totalPayments > 0 ? tr(identityProfile.totalPayments > 1 ? "paiements_reussis_plusieurs" : "paiements_reussis_un", { n: identityProfile.totalPayments }) : tr("reconnu_reseau")}</p>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+                            {style !== "cartes" && style !== "express" && blocDetails}
 
                             {routingInfo && useSmartRouting && (
                                 <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: checkoutTheme.secureBadgeBg }}>
@@ -1641,7 +1850,7 @@ export default function CheckoutPage() {
                         </div>
 
                         <div className="px-6 pb-6 pt-3">
-                            <BoutonPrincipal theme={checkoutTheme} onClick={handleFinalPay} disabled={isPaying || !selectedMethod || (needsPhone && !phoneNumber)}>
+                            <BoutonPrincipal theme={checkoutTheme} onClick={handleFinalPay} style={styleBouton} disabled={isPaying || !selectedMethod || (needsPhone && !phoneNumber)}>
                                 {isPaying ? <Loader2 size={16} className="animate-spin" /> : <><Lock size={14} /> {tr("payer_montant", { montant: formattedAmount, devise: displayCurrency })}</>}
                             </BoutonPrincipal>
                             <p className="mt-3 text-center text-[11px] leading-relaxed" style={{ color: checkoutTheme.textMuted }}>
@@ -1655,17 +1864,15 @@ export default function CheckoutPage() {
                 {checkoutStep === 'initiating' && (
                     <motion.div key="initiating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-6 py-12">
                         <div className="flex flex-col items-center gap-4 text-center">
-                            <div className="relative">
-                                <div className="h-14 w-14 animate-spin rounded-full border-[2.5px]" style={{ borderColor: checkoutTheme.divider, borderTopColor: checkoutTheme.accent }} />
-                                <Zap className="absolute inset-0 m-auto h-5 w-5" style={{ color: checkoutTheme.accent }} />
-                            </div>
+                            <AnneauAttente theme={checkoutTheme}>
+                                {selectedMethod?.logo ? <img src={selectedMethod.logo} alt="" className="h-6 w-6 object-contain" /> : <Phone size={22} style={{ color: checkoutTheme.accent }} />}
+                            </AnneauAttente>
                             <div>
                                 <p className="text-[15px] font-semibold" style={{ color: checkoutTheme.textPrimary }}>{tr("connexion_a", { nom: selectedMethod ? nomCourt(selectedMethod.name) : tr("votre_operateur") })}</p>
                                 <p className="mt-1 text-[12.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("quelques_secondes")}</p>
                             </div>
                             {selectedMethod && needsPhone && (
                                 <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px]" style={{ background: checkoutTheme.methodHoverBg, color: checkoutTheme.textSecondary }}>
-                                    {selectedMethod.logo && <img src={selectedMethod.logo} alt="" className="h-4 w-4 object-contain" />}
                                     {selectedCountry.dial_code} {phoneNumber}
                                 </span>
                             )}
@@ -1773,12 +1980,7 @@ export default function CheckoutPage() {
                 {checkoutStep === 'pending_user' && !modeTestAttente && (
                     <motion.div key="pending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col gap-5 px-6 py-7">
                         <div className="flex flex-col items-center gap-3 text-center">
-                            <div className="relative">
-                                <motion.div animate={{ scale: [1, 1.6], opacity: [0.25, 0] }} transition={{ repeat: Infinity, duration: 1.6 }} className="absolute inset-0 rounded-full" style={{ background: checkoutTheme.accent }} />
-                                <div className="relative z-10 grid h-14 w-14 place-content-center rounded-full" style={{ background: checkoutTheme.methodSelectedBg, color: checkoutTheme.methodSelectedBorder }}>
-                                    <Wifi size={24} />
-                                </div>
-                            </div>
+                            <TelephoneQuiVibre theme={checkoutTheme} />
                             <div>
                                 <h2 className="text-[17px] font-semibold tracking-tight" style={{ color: checkoutTheme.textPrimary }}>{lienApplication ? tr("confirmez_dans", { nom: lienApplication.nom }) : tr("confirmez_telephone")}</h2>
                                 <p className="mt-1 text-[12.5px]" style={{ color: checkoutTheme.textMuted }}>
@@ -1802,6 +2004,15 @@ export default function CheckoutPage() {
                         {consigneFournisseur && (
                             <p className="rounded-xl px-4 py-3 text-[12.5px] leading-relaxed" style={{ background: checkoutTheme.methodHoverBg, color: checkoutTheme.textSecondary }}>{consigneFournisseur}</p>
                         )}
+                        {/* Le code de secours en grand : sur Android, un bouton ouvre le clavier avec le code
+                            (iOS refuse les * et # dans un lien d'appel : le code s'y lit seulement). */}
+                        {codeUssd && !lienApplication && (typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent) ? (
+                            <a href={`tel:${codeUssd.replace(/#/g, '%23')}`} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-[14px] font-semibold no-underline" style={{ background: checkoutTheme.accent, color: '#ffffff' }}>
+                                <Phone size={15} /> {tr("composer_code", { code: codeUssd })}
+                            </a>
+                        ) : (
+                            <p className="rounded-xl px-4 py-2.5 text-center text-[15px] font-semibold tracking-wide" style={{ border: `1px solid ${checkoutTheme.methodBorder}`, color: checkoutTheme.textPrimary }}>{tr("composer_code", { code: codeUssd })}</p>
+                        ))}
                         {/* La consigne du fournisseur (PawaPay : composez #120# puis le code PIN...) fait foi ;
                             les etapes generiques par operateur ne s'affichent qu'a defaut. */}
                         {!(consigneFournisseur && !lienApplication) && (
@@ -1815,7 +2026,7 @@ export default function CheckoutPage() {
                         </ol>
                         )}
                         <div className="flex flex-col items-center gap-2">
-                            <span className="inline-flex items-center gap-2 text-[12.5px] font-medium" style={{ color: checkoutTheme.accent }}><Loader2 size={13} className="animate-spin" /> {tr("en_attente_confirmation")}</span>
+                            <span className="inline-flex items-center gap-2 text-[12.5px] font-medium" style={{ color: checkoutTheme.accent }}><PointsAttente couleur={checkoutTheme.accent} /> {tr("en_attente_confirmation")}</span>
                             <button type="button" onClick={() => setPaymentStatus('verifying')} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("deja_valide")}</button>
                             <button type="button" onClick={() => setPaymentStatus(null)} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("retour")}</button>
                         </div>
@@ -1824,18 +2035,14 @@ export default function CheckoutPage() {
 
                 {/* ═══ ETAPE : VERIFICATION ═══ */}
                 {checkoutStep === 'verifying' && (
-                    <motion.div key="verifying" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-6 py-12">
-                        <div className="flex flex-col items-center gap-4 text-center">
-                            <div className="relative">
-                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }} className="h-14 w-14 rounded-full border-[2.5px]" style={{ borderColor: checkoutTheme.divider, borderTopColor: checkoutTheme.accent }} />
-                                <Search className="absolute inset-0 m-auto h-5 w-5" style={{ color: checkoutTheme.accent }} />
-                            </div>
-                            <div>
-                                <p className="text-[15px] font-semibold" style={{ color: checkoutTheme.textPrimary }}>{tr("verification_paiement")}</p>
-                                <p className="mt-1 text-[12.5px]" style={{ color: checkoutTheme.textMuted }}>{tr("verification_texte")}</p>
-                            </div>
-                            <button type="button" onClick={() => setPaymentStatus(null)} className="text-[12px] underline underline-offset-2" style={{ color: checkoutTheme.textMuted }}>{tr("retour")}</button>
-                        </div>
+                    <motion.div key="verifying" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                        {/* Qui doit repondre : la banque pour une carte, l'operateur sinon. */}
+                        <EcranVerification theme={checkoutTheme} tr={tr} logo={selectedMethod?.logo}
+                            repondant={!selectedMethod ? tr("votre_operateur")
+                                : paiementCarte || /card|carte|visa|mastercard/i.test(`${selectedMethod.type} ${selectedMethod.code} ${selectedMethod.name}`) ? tr("votre_banque")
+                                : nomCourt(selectedMethod.name)}
+                            numero={needsPhone && phoneNumber ? `${selectedCountry.dial_code} ${phoneNumber}` : null}
+                            onRetour={() => setPaymentStatus(null)} />
                     </motion.div>
                 )}
 

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { MARQUE } from "@/lib/marque";
 
 /**
  * Textes des pages de paiement vues par le CLIENT (checkout heberge, lien de
@@ -46,21 +45,28 @@ const FR = {
     autre_moyen: "Utiliser un autre moyen",
     votre_habitude: "Votre habitude",
     payer_avec: "Payer avec",
+    ou_autrement: "Ou payer autrement",
     aucun_moyen_pays: "Aucun moyen de paiement pour {pays}. Changez de pays ci-dessous.",
     prefere: "Préféré",
     voir_autres_moyens: "Voir les {n} autres moyens",
     numero_moyen: "Numéro {moyen}",
     mobile_money: "Mobile Money",
     changer_pays: "Changer de pays",
+    pays: "Pays",
+    pays_aide: "Il décide des moyens de paiement proposés.",
+    indisponible: "Indisponible pour le moment",
+    a_partir_de: "À partir de {montant} {devise}",
+    moyen_indisponible: "{moyen} est momentanément indisponible. Choisissez un autre moyen ou réessayez dans quelques minutes.",
     numero_recevra: "Le numéro qui recevra la demande de paiement.",
     confirmerez_application: "Vous confirmerez dans l'application {app}, sans quitter cette page.",
     finaliserez_page: "Vous finaliserez sur la page sécurisée de {passerelle}, puis reviendrez ici.",
     pays_ou_indicatif: "Pays ou indicatif",
+    aucun_pays: "Aucun pays ne correspond",
     bon_retour: "Bon retour",
-    paiements_reussis_un: `{n} paiement réussi sur le réseau ${MARQUE}`,
-    paiements_reussis_plusieurs: `{n} paiements réussis sur le réseau ${MARQUE}`,
-    reconnu_reseau: `Reconnu sur le réseau ${MARQUE}`,
+    paiements_reussis_un: "{n} paiement réussi.",
+    paiements_reussis_plusieurs: "{n} paiements réussis.",
     trop_de_tentatives: "Trop de tentatives, patientez une minute puis réessayez.",
+    moyen_non_active: "Ce moyen de paiement n'est pas encore activé chez ce marchand. Choisissez un autre moyen.",
     paiement_rembourse: "Ce paiement a été remboursé : il n'y a plus rien à régler.",
     chargement_impossible: "Impossible de charger la page de paiement. Vérifiez votre connexion, puis réessayez.",
     reessayer: "Réessayer",
@@ -106,6 +112,8 @@ const FR = {
 
     // Confirmation sur le telephone ou dans une application
     confirmez_dans: "Confirmez dans {nom}",
+    composer_code: "Composer {code}",
+    demande_deja_envoyee: "Une demande est déjà sur votre téléphone : validez-la plutôt que d'en demander une autre.",
     confirmez_telephone: "Confirmez sur votre téléphone",
     a_confirmer_dans: "{montant} {devise} à confirmer dans l’application {nom}",
     l_application: "l’application",
@@ -117,7 +125,12 @@ const FR = {
 
     // Verification
     verification_paiement: "Vérification du paiement",
-    verification_texte: "Nous confirmons avec votre opérateur, cette page se met à jour toute seule.",
+    verification_texte: "Nous attendons la réponse de {nom}. Cette page se met à jour toute seule.",
+    verif_demande_envoyee: "Demande envoyée",
+    verif_reponse_de: "Réponse de {nom}",
+    verif_paiement_confirme: "Paiement confirmé",
+    verif_lente: "C'est plus long que d'habitude. Restez sur cette page, inutile de payer une seconde fois.",
+    votre_banque: "votre banque",
 
     // Succes
     paiement_reussi: "Paiement réussi",
@@ -217,6 +230,7 @@ const FR = {
     frais_inclus: "Frais de service inclus",
     lien_expire: "Ce lien de paiement a expiré. Demandez-en un nouveau au marchand.",
 
+
     // Page de retour apres un paiement heberge
     suivi_paiement: "Suivi de votre paiement",
     montant_paye: "Montant payé",
@@ -271,21 +285,28 @@ const EN: Record<Cle, string> = {
     autre_moyen: "Use another method",
     votre_habitude: "Your usual choice",
     payer_avec: "Pay with",
+    ou_autrement: "Or pay another way",
     aucun_moyen_pays: "No payment method for {pays}. Change the country below.",
     prefere: "Preferred",
     voir_autres_moyens: "Show {n} more methods",
     numero_moyen: "{moyen} number",
     mobile_money: "Mobile Money",
     changer_pays: "Change country",
+    pays: "Country",
+    pays_aide: "It decides which payment methods are offered.",
+    indisponible: "Unavailable right now",
+    a_partir_de: "From {montant} {devise}",
+    moyen_indisponible: "{moyen} is temporarily unavailable. Choose another method or try again in a few minutes.",
     numero_recevra: "The number that will receive the payment request.",
     confirmerez_application: "You will confirm in the {app} app, without leaving this page.",
     finaliserez_page: "You will finish on the secure page of {passerelle}, then come back here.",
     pays_ou_indicatif: "Country or dialling code",
+    aucun_pays: "No matching country",
     bon_retour: "Welcome back",
-    paiements_reussis_un: `{n} successful payment on the ${MARQUE} network`,
-    paiements_reussis_plusieurs: `{n} successful payments on the ${MARQUE} network`,
-    reconnu_reseau: `Recognised on the ${MARQUE} network`,
+    paiements_reussis_un: "{n} successful payment.",
+    paiements_reussis_plusieurs: "{n} successful payments.",
     trop_de_tentatives: "Too many attempts, wait a minute and try again.",
+    moyen_non_active: "This payment method isn't activated for this merchant yet. Choose another method.",
     paiement_rembourse: "This payment has been refunded: there is nothing left to pay.",
     chargement_impossible: "The payment page could not be loaded. Check your connection, then try again.",
     reessayer: "Try again",
@@ -331,6 +352,8 @@ const EN: Record<Cle, string> = {
 
     // Confirmation on the phone or in an app
     confirmez_dans: "Confirm in {nom}",
+    composer_code: "Dial {code}",
+    demande_deja_envoyee: "A request is already on your phone: confirm it instead of asking for a new one.",
     confirmez_telephone: "Confirm on your phone",
     a_confirmer_dans: "{montant} {devise} to confirm in {nom}",
     l_application: "the app",
@@ -342,7 +365,12 @@ const EN: Record<Cle, string> = {
 
     // Verification
     verification_paiement: "Checking the payment",
-    verification_texte: "We are confirming with your operator, this page updates by itself.",
+    verification_texte: "We are waiting for a response from {nom}. This page updates by itself.",
+    verif_demande_envoyee: "Request sent",
+    verif_reponse_de: "Response from {nom}",
+    verif_paiement_confirme: "Payment confirmed",
+    verif_lente: "This is taking longer than usual. Stay on this page, there is no need to pay again.",
+    votre_banque: "your bank",
 
     // Success
     paiement_reussi: "Payment received",
@@ -441,6 +469,7 @@ const EN: Record<Cle, string> = {
     frais_service: "Service fee",
     frais_inclus: "Service fee included",
     lien_expire: "This payment link has expired. Ask the merchant for a new one.",
+
 
     // Return page after a hosted payment
     suivi_paiement: "Your payment status",

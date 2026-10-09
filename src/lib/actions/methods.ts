@@ -4,7 +4,13 @@ import prisma from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getSelectedAppId } from "./utils";
 import { clePubliqueStripe } from "@/lib/stripe-cle-publique";
-import { PROVIDER_METHODS, moyensDeLaPasserelle, normalizeMethodToken, getOperatorKey, normalizeCountry } from "@/lib/catalogue-moyens";
+import { PROVIDER_METHODS, moyensDeLaPasserelle, normalizeMethodToken, getOperatorKey, cleDuMoyen, deviseDeLaCarte, deviseCarteVisee } from "@/lib/catalogue-moyens";
+import { convertir } from "@/lib/taux-change";
+
+// PayDunya refuse une facture sous 200 F CFA (code 4003, « Minimum checkout amount
+// is 200 FCFA ») : vu le 04/10/2026, des paiements Wave de 50 et 100 F echouaient
+// sur un message anglais.
+const MINIMUM_PAYDUNYA_XOF = 200;
 
 export async function getPaymentMethods() {
     try {
@@ -115,7 +121,7 @@ export async function getPaymentMethods() {
         const methodProviderMap = new Map<string, Array<{ gatewayId: string; provider: string; methodId?: string; isActive?: boolean; name?: string }>>();
         const methodAliasMap = new Map<string, Set<string>>();
         for (const dm of derivedMethods) {
-            const key = `${getOperatorKey(dm.name)}||${normalizeCountry(dm.country)}`;
+            const key = cleDuMoyen(dm);
             if (!methodProviderMap.has(key)) methodProviderMap.set(key, []);
             if (!methodAliasMap.has(key)) methodAliasMap.set(key, new Set());
             methodAliasMap.get(key)!.add(dm.name);
@@ -139,7 +145,7 @@ export async function getPaymentMethods() {
         const result: any[] = [];
 
         for (const dm of derivedMethods) {
-            const dedupeKey = `${getOperatorKey(dm.name)}||${normalizeCountry(dm.country)}`;
+            const dedupeKey = cleDuMoyen(dm);
             if (seen.has(dedupeKey)) continue;
             seen.add(dedupeKey);
 
@@ -231,7 +237,7 @@ export async function togglePaymentMethod(
         return { success: false, error: "Échec de la mise à jour" };
     }
 }
-export async function getPaymentMethodsByAppId(applicationId: string) {
+export async function getPaymentMethodsByAppId(applicationId: string, devise?: string | null, montant?: number | null) {
     try {
         const gateways = await prisma.gateway.findMany({ where: { applicationId, status: "active" } });
         const managed = false;
@@ -261,7 +267,7 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
             if (!m.isActive) {
                 disabledKeys.add(`${m.name.toLowerCase().trim()}||${m.provider.toLowerCase().trim()}||${m.country.toLowerCase().trim()}`);
                 disabledNameCountry.add(`${m.name.toLowerCase().trim()}||${m.country.toLowerCase().trim()}`);
-                disabledOperatorCountry.add(`${getOperatorKey(m.name)}||${normalizeCountry(m.country)}`);
+                disabledOperatorCountry.add(cleDuMoyen(m));
             }
         }
 
@@ -283,6 +289,12 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
         // Collect all available methods per unique method key (name||country)
         // key → array of candidate gateways
         const methodCandidates: Map<string, any[]> = new Map();
+        // Montant du paiement en F CFA, pour les minimums des passerelles. Un moyen
+        // que seule une passerelle au-dessus de son minimum sert reste dans la
+        // liste, grise, avec ce minimum (« A partir de 200 XOF ») ; une autre
+        // passerelle qui le sert prend le relais.
+        const montantXof = montant != null && Number.isFinite(Number(montant)) ? convertir(Number(montant), devise || "XOF", "XOF") : null;
+        const sousMinimum: Map<string, any> = new Map();
 
         for (const gateway of gateways) {
             const gwName = gateway.name.toLowerCase();
@@ -303,13 +315,20 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
             for (const method of supported) {
                 if (pawapayActive && !pawapayActive.has(method.code)) continue;
                 if (carteParStripe && method.type === 'CARD' && providerKey !== 'stripe') continue;
+                // Carte par devise : seule la ligne de la devise du paiement (ou USD) est proposee.
+                const carte = deviseDeLaCarte(method);
+                if (carte && devise && carte !== deviseCarteVisee(devise)) continue;
                 const disableKey = `${method.name.toLowerCase().trim()}||${gateway.name.toLowerCase().trim()}||${method.country.toLowerCase().trim()}`;
                 const disableNcKey = `${method.name.toLowerCase().trim()}||${method.country.toLowerCase().trim()}`;
-                const disableOpKey = `${getOperatorKey(method.name)}||${normalizeCountry(method.country)}`;
+                const disableOpKey = cleDuMoyen(method);
                 if (disabledKeys.has(disableKey) || disabledNameCountry.has(disableNcKey) || disabledOperatorCountry.has(disableOpKey)) continue;
 
                 // Deduplicate by operator + country (shown as one entry to the user)
-                const dedupeKey = `${getOperatorKey(method.name)}||${normalizeCountry(method.country)}`;
+                const dedupeKey = cleDuMoyen(method);
+                if (providerKey === 'paydunya' && montantXof !== null && montantXof < MINIMUM_PAYDUNYA_XOF) {
+                    if (!sousMinimum.has(dedupeKey)) sousMinimum.set(dedupeKey, { ...method, gatewayId: gateway.id, provider: gateway.name });
+                    continue;
+                }
                 if (!methodCandidates.has(dedupeKey)) {
                     methodCandidates.set(dedupeKey, []);
                 }
@@ -322,6 +341,12 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
                 });
             }
         }
+
+        // Sante des moyens (25/09/2026) : un moyen en panne chez une passerelle cede
+        // la place a une autre qui le sert ; en panne partout, il reste dans la
+        // liste mais grise (« indisponible ») et se degrise quand il revient.
+        const { lireSante, etatDuMoyen } = await import("@/lib/orchestrator/sante-moyens");
+        const sante = await lireSante();
 
         // For each deduplicated method, pick the assigned gateway or the first available
         const result: any[] = [];
@@ -345,8 +370,20 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
                 }
             }
 
+            let indisponible = false;
+            if (sante.size > 0 && selected.type !== 'CARD') {
+                const etatDe = (c: { gatewayId: string; provider: string; name: string; flag?: string }) => etatDuMoyen({ id: c.gatewayId, name: c.provider }, { operateur: getOperatorKey(c.name), pays: String(c.flag || '').toUpperCase(), libelle: c.name }, sante).etat;
+                if (etatDe(selected) === 'INDISPONIBLE') {
+                    const saine = candidates.find((c) => etatDe(c) !== 'INDISPONIBLE');
+                    if (saine) selected = saine; else indisponible = true;
+                }
+            }
+
             result.push({
                 id: `${selected.gatewayId}-${selected.code}-${index}`,
+                // Cle stable d'un moyen (operateur et pays) : la page relit l'etat par elle.
+                cle: dedupeKey,
+                indisponible,
                 name: selected.name,
                 gateway: selected.provider,
                 gatewayId: selected.gatewayId,
@@ -366,6 +403,26 @@ export async function getPaymentMethodsByAppId(applicationId: string) {
                     gatewayId: c.gatewayId,
                     provider: c.provider,
                 })),
+            });
+            index++;
+        }
+
+        for (const [dedupeKey, m] of sousMinimum.entries()) {
+            if (methodCandidates.has(dedupeKey)) continue;
+            result.push({
+                id: `${m.gatewayId}-${m.code}-${index}`,
+                cle: dedupeKey,
+                indisponible: true,
+                minimum: { montant: MINIMUM_PAYDUNYA_XOF, devise: "XOF" },
+                name: m.name,
+                gateway: m.provider,
+                gatewayId: m.gatewayId,
+                logo: m.logo,
+                type: m.type,
+                country: m.country,
+                flag: m.flag,
+                code: m.code,
+                candidates: [],
             });
             index++;
         }

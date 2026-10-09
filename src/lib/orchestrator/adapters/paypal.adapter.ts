@@ -104,12 +104,18 @@ export class PayPalAdapter implements IPaymentProvider {
         return SANS_CENTIMES.has(devise) ? String(Math.round(valeur)) : (Math.round(valeur * 100) / 100).toFixed(2);
     }
 
-    /** Statut Cartflox d'une commande PayPal, captures comprises. */
+    /**
+     * Statut Cartflox d'une commande PayPal. Des qu'il y a une capture, c'est
+     * elle qui decide : une capture EN ATTENTE (examen PayPal, devise que le
+     * compte ne detient pas, eCheck) laisse la commande « COMPLETED » alors que
+     * l'argent n'est pas acquis ; on attend, sans conclure au succes.
+     */
     private static statutCommande(commande: any): PaymentStatus {
         const statut = String(commande?.status || '').toUpperCase();
-        const captures: any[] = commande?.purchase_units?.[0]?.payments?.captures || [];
-        if (captures.some((c) => String(c?.status).toUpperCase() === 'COMPLETED')) return 'SUCCESS';
-        if (captures.length && captures.every((c) => ['DECLINED', 'FAILED'].includes(String(c?.status).toUpperCase()))) return 'FAILED';
+        const captures = (commande?.purchase_units?.[0]?.payments?.captures || []).map((c: any) => String(c?.status).toUpperCase());
+        if (captures.some((s: string) => ['COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(s))) return 'SUCCESS';
+        if (captures.length && captures.every((s: string) => ['DECLINED', 'FAILED'].includes(s))) return 'FAILED';
+        if (captures.length) return 'PENDING';
         if (statut === 'COMPLETED') return 'SUCCESS';
         if (statut === 'VOIDED') return 'FAILED';
         return 'PENDING';
@@ -139,9 +145,10 @@ export class PayPalAdapter implements IPaymentProvider {
                 payment_source: {
                     paypal: {
                         ...(request.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.customerEmail) ? { email_address: request.customerEmail } : {}),
+                        // Ni langue ni page d'arrivee imposees : PayPal choisit selon
+                        // l'acheteur (langue de son navigateur ou de son compte ;
+                        // connexion s'il a deja un compte PayPal, sinon carte).
                         experience_context: {
-                            locale: 'fr-FR',
-                            landing_page: 'LOGIN',
                             user_action: 'PAY_NOW',
                             shipping_preference: 'NO_SHIPPING',
                             return_url: request.returnUrl,

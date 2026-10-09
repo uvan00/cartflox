@@ -52,6 +52,15 @@ const MOTIFS_CARTE: Record<string, { message: string; action?: string }> = {
     expired_card: { message: "Cette carte est expirée.", action: "Utilisez une autre carte." },
     incorrect_cvc: { message: "Le code de sécurité de la carte est incorrect.", action: "Vérifiez les trois chiffres au dos de la carte." },
     do_not_honor: { message: "Votre banque a refusé l'opération sans en préciser la raison.", action: "Contactez votre banque, ou payez par Mobile Money." },
+    // Les mêmes que la page de paiement (REFUS_CARTE) : sans eux, le motif gardé pour le
+    // marchand restait la phrase anglaise de Stripe (« Your card does not support this
+    // type of purchase », 06/10/2026).
+    transaction_not_allowed: { message: "Votre banque n'autorise pas ce type d'achat sur cette carte.", action: "Demandez-lui d'ouvrir les paiements en ligne, ou payez par Mobile Money." },
+    try_again_later: { message: "Votre banque a refusé le paiement pour le moment.", action: "Réessayez dans quelques minutes." },
+    incorrect_number: { message: "Le numéro de carte est incorrect.", action: "Vérifiez le numéro, ou utilisez une autre carte." },
+    card_velocity_exceeded: { message: "Votre banque a bloqué la carte après trop de tentatives.", action: "Attendez un moment avant de réessayer." },
+    authentication_required: { message: "La confirmation demandée par votre banque (3-D Secure) n'a pas abouti.", action: "Recommencez et validez la demande de votre banque." },
+    processing_error: { message: "La banque n'a pas pu traiter le paiement.", action: "Réessayez dans quelques minutes." },
 }
 
 const texte = (v: unknown) => (typeof v === "string" ? v.trim() : "")
@@ -74,6 +83,8 @@ export function motifEchec(rawData: unknown): MotifEchec | null {
 
     const connu = MOTIFS[code.toUpperCase()] || MOTIFS_CARTE[code.toLowerCase()]
     if (connu) return { code, ...connu }
+    // Refus de carte au motif inconnu de nous : la banque a refusé, on le dit en français.
+    if (texte(d?.last_payment_error?.code) === "card_declined") return { code, ...MOTIFS_CARTE.card_declined }
 
     // Pas de code connu : on reprend le message du fournisseur s'il est lisible.
     const brut =

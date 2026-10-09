@@ -57,11 +57,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         const q = normalize(rawCountry);
         const target = ISO_TO_COUNTRY[q] || q;
 
-        const all = await getPaymentMethodsByAppId(auth.applicationId);
+        const all = await getPaymentMethodsByAppId(auth.applicationId, tx.currency, tx.amount);
         // Meme logique que la page checkout : le filtre pays garde aussi les
         // methodes globales (cartes UEMOA/International) valables partout.
         const GLOBAL = new Set(["uemoa", "cemac", "international", "global"]);
         const methods = (Array.isArray(all) ? all : [])
+            // Sous le minimum de la seule passerelle qui le sert (PayDunya : 200 F CFA),
+            // un moyen ne peut pas payer cette session : il n'est pas propose.
+            .filter((m: any) => !m.minimum)
             .filter((m: any) => {
                 if (!q) return true;
                 const mc = normalize(m && m.country);

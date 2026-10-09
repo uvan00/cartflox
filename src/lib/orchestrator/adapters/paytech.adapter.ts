@@ -36,6 +36,9 @@ const CIBLE: [RegExp, string][] = [
     [/orange/, 'Orange Money'], [/wave/, 'Wave'], [/free/, 'Free Money'], [/wizall/, 'Wizall'], [/e-?money/, 'Emoney'],
 ];
 
+/** Ce que lit l'acheteur quand le compte PayTech du marchand n'est pas encore active. */
+export const MOYEN_NON_ACTIVE = "Ce moyen de paiement n'est pas encore activé chez ce marchand. Choisissez un autre moyen.";
+
 export class PayTechAdapter implements IPaymentProvider {
     readonly name = 'PayTech';
 
@@ -103,7 +106,14 @@ export class PayTechAdapter implements IPaymentProvider {
             }
             const url = data?.redirect_url || data?.redirectUrl;
             if (!reponse.ok || Number(data?.success) !== 1 || !url) {
-                return echec(this.message(data) || `PayTech a répondu ${reponse.status}`, data);
+                const refus = this.message(data);
+                // Compte PayTech pas encore active en production : leur message donne
+                // leurs contacts de support, ce que l'acheteur n'a pas a lire. La phrase
+                // d'origine reste dans rawData pour le marchand et le journal.
+                if (/activer votre compte|paiements en production/i.test(refus)) {
+                    return echec(MOYEN_NON_ACTIVE, data);
+                }
+                return echec(refus || `PayTech a répondu ${reponse.status}`, data);
             }
             // Numero saisi chez nous et operateur unique : la page PayTech arrive
             // pre-remplie et se soumet toute seule (nac=1), l'acheteur n'a plus qu'a

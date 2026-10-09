@@ -12,6 +12,8 @@ const FOURNISSEURS = [
     "kkiapay", "coinbase", "fedapay", "feexpay", "notchpay", "cryptomus",
     "qosic", "monetbill", "payplus", "hub2", "lengopay",
     "paytech", "onepay", "djamo", "ipay", "paypal",
+    // Simulation (hors production, cf. la fabrique) : pour les essais locaux du routage.
+    "mock",
     // « wave » en dernier : « flutterwave » le contient.
     "wave",
 ];

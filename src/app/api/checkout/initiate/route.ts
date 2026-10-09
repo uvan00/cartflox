@@ -1,142 +1,40 @@
 import { devisePourPayPal } from '@/lib/orchestrator/adapters/paypal.adapter';
 import { detectProviderKey } from "@/lib/cle-fournisseur";
-import { passerelleSertLeMoyen } from "@/lib/catalogue-moyens";
+import { cleFournisseurDuNom } from "@/lib/catalogue-moyens";
+import { CODES_OPERATEUR_FERME, choisirPasserelleSaine, etatDuMoyen, lireSante, moyenDuCode, signalerIndisponible } from "@/lib/orchestrator/sante-moyens";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { messageBacASable } from "@/lib/mode-espace";
 import { buildAdapterConfig as construireConfigAdaptateur } from "@/lib/orchestrator/executor";
-import { contexteRoutage, ordonnerParMesure, enregistrerIssue } from "@/lib/orchestrator/routage-mesure";
-import { categoriserEchec } from "@/lib/orchestrator/categorie-echec";
+import { contexteRoutage, contexteRoutageAncien, enregistrerIssue, lireMesures } from "@/lib/orchestrator/routage-mesure";
+import { IDENTIFIANTS_REFUSES, categoriserEchec, categoriserException } from "@/lib/orchestrator/categorie-echec";
+import { router } from "@/lib/orchestrator/routeur";
+import { jouerTentatives } from "@/lib/orchestrator/tentatives";
+import { VERIFIABLES_PAR_NOTRE_REFERENCE, depotPrisma } from "@/lib/orchestrator/tentatives-depot";
+import { leverVerrou, poserVerrou } from "@/lib/orchestrator/verrou-initiation";
+import { completerDecision } from "@/lib/routing-audit";
 import { qrCartflox } from "@/lib/qr";
 import { PaymentOrchestratorFactory } from "@/lib/orchestrator/factory";
 import { PaymentRequest } from "@/lib/orchestrator/types";
 import { PayDunyaAdapter } from "@/lib/orchestrator/adapters/paydunya.adapter";
 import { Hub2Adapter } from "@/lib/orchestrator/adapters/hub2.adapter";
-import {
-    resolveGatewayOrder,
-    updateSuccessScore,
-    RoutingConfig as EngineConfig,
-    PaymentContext,
-} from "@/lib/orchestrator/routing-engine";
+import type { RoutingConfig as EngineConfig, PaymentContext } from "@/lib/orchestrator/routing-engine";
 import { sendPaymentConfirmationEmail, sendPaymentReceiptEmail, sendCredentialsRefusedEmail } from "@/lib/email";
 import { applyVerificationResult } from "@/lib/transaction-finalize";
 import { masquerSecrets } from "@/lib/secret";
 import { clePubliqueStripe } from "@/lib/stripe-cle-publique";
 import { DEVISES_SANS_CENTIMES } from "@/lib/devises";
+import { DEVISE_PAYS_CHECKOUT, ZONES_FRANC, convertir, deviseDuMoyen, rafraichirTaux } from "@/lib/taux-change";
+import { dernierEnvoi, relanceRetenue } from "@/lib/relance-paiement";
 
-// ── Currency conversion for cross-country payments ──
-const COUNTRY_CURRENCY_MAP: Record<string, string> = {
-    // UEMOA (XOF)
-    CI: 'XOF', SN: 'XOF', BJ: 'XOF', ML: 'XOF', BF: 'XOF', TG: 'XOF', NE: 'XOF', GW: 'XOF',
-    // CEMAC (XAF)
-    CM: 'XAF', GA: 'XAF', CG: 'XAF', TD: 'XAF', CF: 'XAF',
-    // Other African
-    GN: 'GNF', CD: 'CDF', GH: 'GHS', NG: 'NGN', KE: 'KES', TZ: 'TZS',
-    UG: 'UGX', RW: 'RWF', ZA: 'ZAR', ZM: 'ZMW', MW: 'MWK', MZ: 'MZN',
-    AO: 'AOA', ET: 'ETB', MG: 'MGA', SL: 'SLE', MR: 'MRU',
-    // Global
-    US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR',
-};
-
-// PawaPay 3-letter country suffix → ISO alpha-2 → currency
-const METHOD_SUFFIX_TO_COUNTRY: Record<string, string> = {
-    CIV: 'CI', SEN: 'SN', BEN: 'BJ', MLI: 'ML', BFA: 'BF', TGO: 'TG',
-    GIN: 'GN', NER: 'NE', CMR: 'CM', GAB: 'GA', COG: 'CG', COD: 'CD',
-    TCD: 'TD', CAF: 'CF', GHA: 'GH', NGA: 'NG', KEN: 'KE', TZA: 'TZ',
-    RWA: 'RW', UGA: 'UG', ZAF: 'ZA', MDG: 'MG', SLE: 'SL', GNB: 'GW',
-    MRT: 'MR', ZMB: 'ZM', MWI: 'MW', MOZ: 'MZ', AGO: 'AO', ETH: 'ET',
-};
-
-/**
- * Detect the required currency from a payment method code.
- * Method codes like MTN_MOMO_CMR, ORANGE_CIV contain a 3-letter country suffix.
- */
-function detectCurrencyFromMethodCode(methodCode: string): string | null {
-    const upper = (methodCode || '').toUpperCase();
-    const parts = upper.split('_');
-    // Try last segment as 3-letter country suffix
-    for (let i = parts.length - 1; i >= 0; i--) {
-        const seg = parts[i];
-        if (seg.length === 3 && METHOD_SUFFIX_TO_COUNTRY[seg]) {
-            const alpha2 = METHOD_SUFFIX_TO_COUNTRY[seg];
-            return COUNTRY_CURRENCY_MAP[alpha2] || null;
-        }
-    }
-    return null;
-}
-
-// Rates: 1 XOF → target currency. STATIC FALLBACK used when the live rate API
-// is unavailable. Anchor: 1 USD ≈ 615 XOF. Updated 2026-06.
-const XOF_RATES_FALLBACK: Record<string, number> = {
-    XOF: 1, XAF: 1,       // Fixed parity UEMOA/CEMAC
-    GNF: 14, CDF: 4.7, GHS: 0.019, NGN: 2.5, KES: 0.21, TZS: 4.3,
-    UGX: 5.9, RWF: 2.3, ZAR: 0.029, ZMW: 0.042, MWK: 2.8, MZN: 0.104,
-    AOA: 1.5, ETB: 0.23, MGA: 7.3, MAD: 0.016, DZD: 0.21, TND: 0.0048,
-    EGP: 0.079, SLE: 0.037, MRU: 0.065,
-    USD: 0.00163, EUR: 0.001524, GBP: 0.00127,
-};
-
-// Live rates cache (1 XOF → target). Refreshed at most once per 24h from a free
-// no-key API; falls back to the static table on any failure.
-let liveXofRates: Record<string, number> | null = null;
-let liveXofRatesFetchedAt = 0;
-const FX_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function refreshXofRatesIfStale(): Promise<void> {
-    if (liveXofRates && Date.now() - liveXofRatesFetchedAt < FX_TTL_MS) return;
-    try {
-        const res = await fetch("https://open.er-api.com/v6/latest/XOF", {
-            signal: AbortSignal.timeout(5000),
-            cache: "no-store",
-        });
-        const data = await res.json();
-        if (data?.result === "success" && data.rates && typeof data.rates === "object") {
-            // Un cours vivant qui s'ecarte de plus de 20 % de la table de repli est
-            // suspect (API compromise ou en panne) : on garde la table pour lui.
-            const taux: Record<string, number> = { ...data.rates, XOF: 1 };
-            for (const [dev, ref] of Object.entries(XOF_RATES_FALLBACK)) {
-                const v = taux[dev];
-                if (typeof v !== "number" || !(v > 0) || !(ref > 0) || Math.abs(v / ref - 1) > 0.2) taux[dev] = ref;
-            }
-            liveXofRates = taux;
-            liveXofRatesFetchedAt = Date.now();
-        }
-    } catch {
-        // keep last good / fall back to static table
-    }
-}
-
-/** Zone franc : 1 EUR = 655,957 XOF, parite FIXE par traite, pas un cours. */
-const PARITE_EUR = 1 / 655.957;
-const ZONES_FRANC = new Set(['XOF', 'XAF']);
-
-/**
- * Devises sans subdivision : le montant s'y exprime en unites entieres. Les
- * autres ont des centimes, et arrondir a l'unite y ferait payer jusqu'a 99
- * centimes de trop. 3 000 XOF valent 4,57 EUR, pas 5 EUR.
- */
-
-
-function convertCurrency(amount: number, fromCurrency: string, toCurrency: string): number {
-    if (fromCurrency === toCurrency) return amount;
-    const de = (fromCurrency || '').toUpperCase();
-    const vers = (toCurrency || '').toUpperCase();
-
-    // La parite franc/euro est fixe : la prendre sur un cours du marche ferait
-    // deriver le montant sans raison.
-    if (ZONES_FRANC.has(de) && vers === 'EUR') {
-        return Math.round(amount * PARITE_EUR * 100) / 100;
-    }
-
-    const rates = liveXofRates || XOF_RATES_FALLBACK;
-    const toXOFRate = de === 'XOF' ? 1 : (1 / (rates[de] || XOF_RATES_FALLBACK[de] || 1));
-    const amountInXOF = amount * toXOFRate;
-    const rate = rates[vers] || XOF_RATES_FALLBACK[vers] || 1;
-    const brut = amountInXOF * rate;
-    return DEVISES_SANS_CENTIMES.has(vers) ? Math.round(brut) : Math.round(brut * 100) / 100;
-}
+// ── Conversion de devise : le taux de change de l'instance (lib/taux-change.ts),
+// partage avec les tableaux de bord. Noms d'origine gardes ici.
+const COUNTRY_CURRENCY_MAP = DEVISE_PAYS_CHECKOUT;
+const detectCurrencyFromMethodCode = (code: string) => deviseDuMoyen(code);
+const refreshXofRatesIfStale = rafraichirTaux;
+const convertCurrency = convertir;
 
 /** Reponse brute d'un fournisseur renvoyee au navigateur : jamais avec une cle en echo. */
 const brut = (v: any) => masquerSecrets(JSON.parse(JSON.stringify(v || {})));
@@ -154,6 +52,36 @@ function extractProviderErrorMessage(rawData: any): string {
         rawData?.failureReason ||
         ''
     );
+}
+
+/**
+ * Motif d'un refus de PayDunya, lisible par l'acheteur. Le refus de montant arrive
+ * en anglais (« Invalid Total Amount. Mimimum checkout amount is 200 FCFA. », code
+ * 4003, faute comprise) : vu le 04/10/2026 sur des paiements Wave de 50 et 100 F.
+ */
+function motifPaydunyaLisible(message: string): string {
+    const minimum = /mi[nm]imum checkout amount is\s*([\d\s.,]+?)\s*FCFA/i.exec(message || '');
+    if (minimum) return `Ce moyen de paiement demande au moins ${minimum[1].trim()} F CFA. Choisissez un autre moyen de paiement.`;
+    return message;
+}
+
+/**
+ * Refus de montant de PawaPay, lisible par l'acheteur : il arrive en anglais (« The amount
+ * needs to be more than '10' and less than '6250000' for the country 'COD'. », « Transaction
+ * amount 6406389 exceeds the maximum limit of 1000000 »). Vu le 05/10/2026 sur 6 406 389 CDF
+ * par Orange RDC. Null si le refus ne porte pas sur le montant.
+ */
+function motifMontantLisible(rawData: any, devise: string): string | null {
+    const texte = [rawData?.failureReason?.failureMessage, rawData?.rejectionReason?.rejectionMessage, rawData?.error, rawData?.message]
+        .filter((v) => typeof v === 'string').join(' ');
+    const nombre = (v: string) => Number(v).toLocaleString('fr-FR');
+    const bornes = /more than '?(\d+(?:\.\d+)?)'? and less than '?(\d+(?:\.\d+)?)'?/i.exec(texte);
+    if (bornes) return `Ce moyen de paiement accepte de ${nombre(bornes[1])} à ${nombre(bornes[2])} ${devise} par paiement. Choisissez un autre moyen de paiement.`;
+    const plafond = /maximum limit of\s*(\d+(?:\.\d+)?)/i.exec(texte);
+    if (plafond) return `Ce moyen de paiement accepte au plus ${nombre(plafond[1])} ${devise} par paiement. Choisissez un autre moyen de paiement.`;
+    const plancher = /minimum limit of\s*(\d+(?:\.\d+)?)/i.exec(texte);
+    if (plancher) return `Ce moyen de paiement demande au moins ${nombre(plancher[1])} ${devise}. Choisissez un autre moyen de paiement.`;
+    return null;
 }
 
 // Public API route — no session required
@@ -174,6 +102,8 @@ function nettoyerNumero(brut: string): string {
 }
 
 export async function POST(req: NextRequest) {
+    let verrouPose = false;
+    let transactionVerrouillee = '';
     try {
         // --- Rate limiting: 30 initiate/min per IP ---
         const ip = getClientIp(req);
@@ -186,7 +116,9 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json() as any;
-        const { transactionId, gatewayId, methodCode, customerDetails } = body;
+        const { transactionId, methodCode, customerDetails } = body;
+        // Peut changer plus bas : depart d'une passerelle saine (sante des moyens).
+        let gatewayId: string = body.gatewayId;
 
         if (customerDetails?.phone) {
             const propre = nettoyerNumero(customerDetails.phone);
@@ -209,7 +141,7 @@ export async function POST(req: NextRequest) {
         console.log(`🚀 CHECKOUT_INITIATE: tx=${transactionId} gw=${gatewayId} method=${methodCode} country=${customerDetails.country || '?'}`);
 
         // 1. Fetch Transaction
-        const transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
+        let transaction = await prisma.transaction.findUnique({ where: { id: transactionId } });
         if (!transaction) {
             return NextResponse.json({ success: false, message: "Transaction introuvable" }, { status: 404 });
         }
@@ -224,12 +156,43 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, status: transaction.status, message: "Cette transaction n'est plus payable." }, { status: 409 });
         }
 
+        // 1b bis. VERROU d'initiation (08/10/2026, modele Hyperswitch : un seul chemin a
+        // la fois par paiement). Deux clics rapproches ou deux onglets lancaient deux
+        // demandes chez le fournisseur avant que la premiere ait ecrit sa reference. Il
+        // expire seul apres 90 s et se leve a la fin de cette requete (bloc finally).
+        transactionVerrouillee = transactionId;
+        verrouPose = await poserVerrou(transactionId);
+        if (!verrouPose) {
+            console.log(`🔒 VERROU: tx=${transactionId} une initiation est deja en cours`);
+            return NextResponse.json({ success: false, enCours: true, message: "Un paiement est déjà en cours de traitement pour cette commande. Patientez quelques secondes, puis réessayez." }, { status: 409 });
+        }
+        // Relecture sous verrou : les ecritures qui suivent repartent des metadonnees a jour.
+        transaction = (await prisma.transaction.findUnique({ where: { id: transactionId } })) ?? transaction;
+
+        // 1c. Une demande attend encore sur CE telephone avec CE moyen (moins de 90 s) :
+        // on n'en envoie pas une autre par-dessus (lib/relance-paiement.ts).
+        const enAttente = relanceRetenue(transaction, methodCode, String(customerDetails?.phone || ''));
+        if (enAttente) {
+            console.log(`⏸️ RELANCE_RETENUE: tx=${transactionId} demande en attente depuis ${Math.round((Date.now() - Date.parse(enAttente.le)) / 1000)} s`);
+            return NextResponse.json({
+                success: true,
+                status: 'PENDING',
+                dejaEnvoye: true,
+                providerReference: transaction.providerRef,
+                provider: transaction.provider,
+                rawData: {
+                    ...(enAttente.consigne ? { _instructions: enAttente.consigne } : {}),
+                    ...(enAttente.ussd ? { _ussd: enAttente.ussd } : {}),
+                },
+            });
+        }
+
         // BAC A SABLE : une transaction de TEST (cle af_test_...) ou un espace en
         // mode test ne touche JAMAIS un agregateur. La page de paiement propose
         // alors de simuler l'issue (POST /api/checkout/sandbox) et le webhook
         // part comme en production, avec livemode: false.
         const espaceTx = transaction.applicationId
-            ? await prisma.application.findUnique({ where: { id: transaction.applicationId }, select: { paymentMode: true, liveMode: true } as any }) as any
+            ? await prisma.application.findUnique({ where: { id: transaction.applicationId }, select: { liveMode: true } as any }) as any
             : null;
         const enBacASable = (transaction as any).test === true || (!!transaction.applicationId && !!espaceTx && espaceTx.liveMode !== true);
         if (enBacASable || gatewayId === 'sandbox') {
@@ -246,6 +209,25 @@ export async function POST(req: NextRequest) {
             }).catch(() => { });
             console.log(`[sandbox] paiement simulé : tx=${transactionId} ${(transaction as any).test ? "(clé de test)" : `(espace ${transaction.applicationId} en mode test)`}`);
             return NextResponse.json({ success: false, sandbox: true, status: 'SANDBOX', message: messageBacASable() }, { status: 403 });
+        }
+
+        // 1c. SANTE DES MOYENS (25/09/2026) : le moyen est en panne chez la
+        // passerelle proposee par la page (operateur ferme chez l'agregateur, ou
+        // refus recents) ? On part d'une passerelle de l'espace qui le sert et
+        // qui marche. Aucune : on le dit tout de suite, sans rien tenter ni
+        // renvoyer le client vers une page d'agregateur qui echouerait aussi.
+        if (transaction.applicationId) {
+            const sain = await choisirPasserelleSaine({
+                applicationId: transaction.applicationId, gatewayId, methodCode, pays: customerDetails.country,
+            }).catch(() => ({} as Awaited<ReturnType<typeof choisirPasserelleSaine>>));
+            if (sain.indisponible) {
+                console.log(`🩺 SANTE: ${methodCode} ${customerDetails.country || ''} indisponible partout, aucun essai`);
+                return NextResponse.json({ success: false, indisponible: true, status: 'UNAVAILABLE', moyen: sain.libelle, message: sain.message }, { status: 503 });
+            }
+            if (sain.gatewayId && sain.gatewayId !== gatewayId) {
+                console.log(`🩺 SANTE: ${methodCode} indisponible chez ${sain.depuis} -> depart ${sain.nom}`);
+                gatewayId = sain.gatewayId;
+            }
         }
 
         // 2. Fetch primary Gateway
@@ -273,12 +255,15 @@ export async function POST(req: NextRequest) {
                 message: messageBacASable(),
             }, { status: 403 });
         }
-        if (!gateway.applicationId || gateway.applicationId !== transaction.applicationId) {
+        // Une passerelle de CET espace, et seulement elle (secours compris, plus bas).
+        const passerelleDeLEspace = (g: { applicationId?: string | null }) => !!g.applicationId && g.applicationId === transaction.applicationId;
+        if (!passerelleDeLEspace(gateway)) {
             return NextResponse.json({ success: false, message: "Passerelle invalide pour cette transaction" }, { status: 403 });
         }
 
         // 3. Update customer details
         const existingMeta = (transaction.metadata as any) || {};
+        const { conversion: _conversionPrecedente, echec: _echecPrecedent, ...metaSansConversion } = existingMeta;
         // Coordonnees : seulement celles fournies, bornees ; un tiers qui connait
         // l'identifiant ne remplace pas l'adresse du recu par la sienne.
         const champ = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
@@ -289,7 +274,10 @@ export async function POST(req: NextRequest) {
                 customerPhone: champ(customerDetails.phone, 32),
                 customerEmail: champ(customerDetails.email, 160),
                 provider: gateway.name,
-                metadata: { ...existingMeta, methodCode, gatewayId }
+                // Une nouvelle tentative (autre moyen, autre pays) efface la conversion et le motif
+                // d'echec de la precedente : le refus d'un Moov Benin restait affiche a cote de la
+                // carte essayee ensuite, comme si la carte avait ete refusee (05/10/2026).
+                metadata: { ...metaSansConversion, methodCode, gatewayId }
             }
         });
 
@@ -321,71 +309,49 @@ export async function POST(req: NextRequest) {
             methodAssignments: (rawRoutingConfig?.methodAssignments as Record<string, string>) ?? {},
         };
 
-        let orderedGatewayIds = resolveGatewayOrder(engineConfig, paymentContext, gatewayId);
-
-        // Une passerelle de SECOURS qui ne sert pas ce moyen ne doit pas etre
-        // essayee. La passerelle choisie par l'acheteur est toujours gardee :
-        // la liste des moyens l'a deja validee.
-        //
-        // ⚠️ C'est ce controle qui manquait. Le marchand Panga (RD Congo) a vu
-        // sept paiements Airtel Money en francs congolais partir chez PayDunya,
-        // qui ne couvre que le Senegal, la Cote d'Ivoire, le Benin, le Togo, le
-        // Mali et le Burkina : facture creee, AUCUN lien de paiement renvoye,
-        // l'acheteur attendait une demande qui n'arrivait jamais, et l'abandon
-        // automatique tombait trente minutes plus tard. Le classement par taux
-        // mesures mettait meme PayDunya en TETE, PawaPay n'ayant aucune reussite
-        // dans ce contexte : d'ou le filtre AVANT la mesure.
-        const passerellesEnLice = await prisma.gateway.findMany({
-            where: { id: { in: orderedGatewayIds } },
-            select: { id: true, name: true, countries: true },
-        });
-        const passerelleParId = new Map<string, any>(passerellesEnLice.map((g: any) => [g.id, g]));
-        const ecartees = orderedGatewayIds.filter(
-            (id: string) => id !== gatewayId && !passerelleSertLeMoyen(passerelleParId.get(id), methodCode),
-        );
-        if (ecartees.length > 0) {
-            orderedGatewayIds = orderedGatewayIds.filter((id: string) => !ecartees.includes(id));
-            console.log(`🚫 ROUTAGE: ${methodCode} non servi par ${ecartees.join(', ')} -> ecartee(s) du secours`);
-        }
-        // L'ordre ci-dessus vient des regles du marchand. On le rejoue ensuite
-        // sur les taux REELS mesures dans ce contexte (pays, methode, devise),
-        // et les passerelles en panne passent derniere. L'ordre des regles sert
-        // d'a priori : sans observation, rien ne bouge.
+        // 5b. LE ROUTEUR (lib/orchestrator/routeur.ts, 08/10/2026, modele Hyperswitch).
+        // En lice : toutes les passerelles de l'espace (actives ou non : le routeur dit
+        // pourquoi il ecarte). Le routeur
+        // applique l'eligibilite (appartenance, catalogue, sante, carte seulement pour
+        // Stripe), puis l'ordre du marchand (affectation, algorithme, secours, secours
+        // implicite), puis la mesure (taux reels par contexte, seau perce, exploration).
+        const candidats: any[] = await prisma.gateway.findMany({
+            where: transaction.applicationId ? { applicationId: transaction.applicationId } : { id: gatewayId },
+        }).catch(() => [] as any[]);
+        if (!candidats.some((c) => c.id === gateway.id)) candidats.push(gateway);
+        const vise = moyenDuCode(methodCode, customerDetails.country);
+        const sante = vise ? await lireSante() : new Map();
         const contexteMesure = contexteRoutage(paymentContext);
-        try {
-            const gws = await prisma.gateway.findMany({
-                where: { id: { in: orderedGatewayIds } }, select: { id: true, name: true },
-            });
-            const cleDe = new Map<string, string>(gws.map((g: any) => [g.id, detectProviderKey(g.name)]));
-            const cles = [...new Set(orderedGatewayIds.map((id: string) => cleDe.get(id)).filter(Boolean) as string[])];
-            if (cles.length > 1) {
-                const apriori: Record<string, number> = {};
-                cles.forEach((k, i) => { apriori[k] = 0.92 - i * 0.01; });
-                const mesure = await ordonnerParMesure(contexteMesure, cles, apriori);
-                const { approche } = mesure;
-                // Un moyen propre a Stripe (code en « -stripe » : carte, Google Pay,
-                // ACH) se paie dans le formulaire integre de Stripe, que l'acheteur a
-                // choisi : Stripe reste en tete, la mesure ne classe que les secours
-                // (une passerelle jamais mesuree passait sinon devant, sur son a priori).
-                const stripeEnTete = /-stripe$/i.test(methodCode) && cles.includes('stripe');
-                const ordre = stripeEnTete ? ['stripe', ...mesure.ordre.filter((k) => k !== 'stripe')] : mesure.ordre;
-                const rang = new Map(ordre.map((k, i) => [k, i]));
-                // Tri stable : a rang egal, l'ordre du marchand est conserve.
-                orderedGatewayIds = [...orderedGatewayIds].sort(
-                    (x: string, y: string) => (rang.get(cleDe.get(x) || "") ?? 99) - (rang.get(cleDe.get(y) || "") ?? 99));
-                console.log(`📊 MESURE [${approche}${stripeEnTete ? ', stripe en tete' : ''}] ${contexteMesure} -> ${ordre.join(' > ')}`);
-            }
-        } catch { /* la mesure ne doit jamais empecher un paiement */ }
+        const mesures = await lireMesures(
+            { contexte: contexteMesure, ancien: contexteRoutageAncien(paymentContext) },
+            candidats.map((c) => ({ gatewayId: c.id, passerelle: detectProviderKey(c.name) })),
+        );
+        const routage = router({
+            choisie: gatewayId,
+            config: engineConfig,
+            contexte: paymentContext,
+            candidats,
+            managed: false,
+            plateformeIds: new Set<string>(),
+            applicationId: transaction.applicationId,
+            autorisee: passerelleDeLEspace,
+            etatMoyen: (g) => (vise && sante.size > 0 ? etatDuMoyen(g as any, vise, sante).etat : 'DISPONIBLE'),
+            mesures,
+            otp: !!customerDetails.otp,
+        });
+        for (const x of routage.exclues) {
+            if (x.id !== gatewayId && x.motif !== 'inactive') console.log(`🚫 ROUTAGE: ${x.nom} ecartee (${x.motif})`);
+        }
+        const orderedGatewayIds = routage.ordre.map((c) => c.id);
+        const maxAttempts = routage.maxTentatives;
+        const isCardMethodCode = /card|visa|master|carte|amex|apple|google|klarna|ideal|sofort|giropay|bancontact|sepa|stripe/i.test(methodCode || '');
 
-        const maxAttempts = Math.min(orderedGatewayIds.length, engineConfig.maxRetries + 1);
-
-        console.log(`🧠 ROUTING [${engineConfig.algorithmKind}]: order=${orderedGatewayIds.join(' → ')} (max ${maxAttempts} attempts)`);
+        console.log(`🧠 ROUTAGE [${engineConfig.algorithmKind} > ${routage.approche}] ${contexteMesure} : ${routage.ordre.map((c) => c.name).join(' > ') || 'aucune passerelle'} (${maxAttempts} essai(s) au plus)`);
 
         // Persist the routing decision for audit / debugging.
         // Fire-and-forget — must never block the payment flow.
-        const assignmentKey = `${methodCode}||${customerDetails.country || ''}`;
-        const assignedOverride = !!engineConfig.methodAssignments?.[assignmentKey];
-        (async () => {
+        const assignedOverride = routage.approche.startsWith('affectation');
+        const decisionEnregistree = (async () => {
             try {
                 const { recordRoutingDecision } = await import('@/lib/routing-audit');
                 await recordRoutingDecision({
@@ -399,9 +365,8 @@ export async function POST(req: NextRequest) {
                     orderedGatewayIds,
                     chosenGatewayId: orderedGatewayIds[0] || null,
                     assignedOverride,
-                    reason: assignedOverride
-                        ? `Override méthode → ${orderedGatewayIds[0]}`
-                        : `${engineConfig.algorithmKind}, ${orderedGatewayIds.length} gateway(s), ${maxAttempts} attempt(s)`,
+                    approche: routage.approche,
+                    reason: `${engineConfig.algorithmKind} (${routage.approche}), ${orderedGatewayIds.length} passerelle(s), ${maxAttempts} essai(s)${routage.exclues.length ? ` ; ecartees : ${routage.exclues.map((x) => `${x.nom} (${x.motif})`).join(', ')}` : ''}`,
                 });
             } catch { /* swallow — logging must never break checkout */ }
         })();
@@ -436,6 +401,22 @@ export async function POST(req: NextRequest) {
             ? convertCurrency(transaction.amount, transaction.currency, localCurrency)
             : transaction.amount;
         const paymentCurrency = localCurrency;
+
+        // Taux de change : un paiement demande dans une devise etrangere au payeur
+        // (dollars le plus souvent) COMPTE dans la monnaie de son pays. On pose ce
+        // montant sur la transaction : c'est lui que montrent les tableaux de bord.
+        // Zone franc payee par carte : l'euro n'est qu'une contrainte de Stripe,
+        // la monnaie du pays reste le franc (deviseLocale), rien a poser.
+        if (deviseLocale && deviseLocale.toUpperCase() !== String(transaction.currency || "").toUpperCase()) {
+            await refreshXofRatesIfStale();
+            const montantPays = localCurrency === deviseLocale ? paymentAmount : convertCurrency(transaction.amount, transaction.currency, deviseLocale);
+            if (montantPays > 0) {
+                await prisma.transaction.update({
+                    where: { id: transactionId },
+                    data: { metadata: { ...metaSansConversion, methodCode, gatewayId, conversion: { devise: deviseLocale.toUpperCase(), montant: montantPays, taux: montantPays / (transaction.amount || 1), le: new Date().toISOString() } } as any },
+                }).catch((e: any) => console.error(`[initiate] conversion non posee tx=${transactionId}:`, e?.message));
+            }
+        }
 
         console.log(`💱 CURRENCY: tx=${transaction.currency} method=${methodCode}→${methodCurrency || '?'} country=${customerCountry}→${countryCurrency || '?'} → final=${paymentCurrency} amount=${paymentAmount}`);
 
@@ -591,7 +572,7 @@ export async function POST(req: NextRequest) {
                         // Log the failure and fall through to routing engine fallback
                         console.log(`⚠️ [PAYDUNYA] Invoice creation failed — will try fallback gateways`);
                         console.error(`❌ [PAYDUNYA] Invoice error detail:`, JSON.stringify(initResponse.rawData));
-                        motifPaydunya = extractProviderErrorMessage(initResponse.rawData);
+                        motifPaydunya = motifPaydunyaLisible(extractProviderErrorMessage(initResponse.rawData));
                         await (prisma as any).providerLog.create({
                             data: {
                                 transactionId,
@@ -688,7 +669,7 @@ export async function POST(req: NextRequest) {
 
                     // SoftPay FAILED — log and fall through to routing engine fallback
                     console.log(`⚠️ [PAYDUNYA] SoftPay failed for ${methodCode} — will try fallback gateways`);
-                    motifPaydunya = extractProviderErrorMessage(softPayResponse.rawData);
+                    motifPaydunya = motifPaydunyaLisible(extractProviderErrorMessage(softPayResponse.rawData));
                     await prisma.transaction.update({
                         where: { id: transactionId },
                         data: { providerRef: null }
@@ -720,263 +701,217 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        let lastError = '';
-        // L'acheteur a choisi UN moyen : si celui-la echoue, c'est SON motif qu'il doit
-        // lire, pas celui d'une passerelle de secours qu'il n'a jamais demandee (un
-        // refus de carte se lisait « Minimum checkout amount is 200 FCFA », message
-        // d'un fournisseur Mobile Money essaye ensuite).
-        let erreurPrincipale = motifPaydunya;
-        let currentSuccessScores: Record<string, number> = (engineConfig.successScores as Record<string, number>) ?? {};
-        let attempts = 0;
+        // ── LES TENTATIVES (lib/orchestrator/tentatives.ts) : une ligne `Tentative` par
+        // essai, notre reference posee AVANT l'appel, delai depasse = incertain (on
+        // verifie, on ne renvoie pas la meme demande ailleurs), refus classe et mesure.
+        const ordre = paydunyaAttempted ? routage.ordre.filter((c) => c.id !== gatewayId) : routage.ordre;
+        const issue = await jouerTentatives({
+            transactionId,
+            contexte: contexteMesure,
+            ordre,
+            maxTentatives: maxAttempts,
+            approche: routage.approche,
+            choisie: gatewayId,
+            adaptateur: (c) => PaymentOrchestratorFactory.getProvider(c.cle, buildAdapterConfig(c, (c as any).config || {}, c.cle)),
+            requete: (c, reference, estSecours) => {
+                // PayDunya en SECOURS pour du mobile money (25/09/2026) : la demande est
+                // poussee sur le telephone (SoftPay), le client reste sur la page de
+                // paiement au lieu de partir sur celle de PayDunya.
+                const metaSecours = estSecours && c.cle === 'paydunya' && !isCardMethodCode
+                    ? { softpay: true, pays: String(customerDetails.country || '').toUpperCase() }
+                    : {};
+                return {
+                    ...basePaymentRequest,
+                    callbackUrl: `${baseUrl}/api/webhooks/${c.cle}`,
+                    // NOTRE reference, posee avant l'appel : PawaPay la prend comme identifiant
+                    // de depot, et la relecture marche meme si sa reponse s'est perdue.
+                    metadata: { ...basePaymentRequest.metadata, methodCode, ...(c.cle === 'pawapay' ? { depositId: reference } : {}), ...metaSecours },
+                };
+            },
+            depot: depotPrisma,
+            categoriser: categoriserEchec,
+            categoriserException,
+            mesurer: (m) => enregistrerIssue({ contexte: contexteMesure, ...m }),
+            motif: (rawData, c) => motifMontantLisible(rawData, paymentCurrency) || extractProviderErrorMessage(rawData) || `${c.name} FAILED`,
+            // Operateur ferme chez ce fournisseur : le moyen passe indisponible chez lui
+            // tout de suite (grise dans les pages, evite par le routeur), sans attendre
+            // le prochain passage du cron de sante.
+            operateurFerme: async (c, codeRefus) => {
+                if (!CODES_OPERATEUR_FERME.has(codeRefus)) return false;
+                const fournisseur = cleFournisseurDuNom(c.name);
+                if (vise && fournisseur) await signalerIndisponible({ cle: fournisseur, pays: vise.pays, operateur: vise.operateur, detail: `${c.name} : ${codeRefus}` }).catch(() => { });
+                return true;
+            },
+            journal: async (type, payload) => {
+                await (prisma as any).providerLog.create({ data: { transactionId, type, payload: { algorithm: engineConfig.algorithmKind, ...payload } } }).catch(() => { });
+            },
+        });
+        // Une fois la decision ecrite (elle part en tache de fond plus haut) : la gagnante et le nombre d'essais.
+        decisionEnregistree.then(() => completerDecision(transaction.id, { chosenGatewayId: issue.issue === 'ECHEC' ? null : issue.candidat.id, tentatives: issue.tentatives })).catch(() => { });
 
-        for (const trialGwId of orderedGatewayIds) {
-            if (attempts >= maxAttempts) break;
+        // Les metadonnees A JOUR, relues apres les tentatives. `existingMeta` date du debut de
+        // la requete : l'etaler effacait la conversion posee plus haut pour CE paiement (un
+        // paiement en dollars encaisse en francs s'affichait en dollars) et remettait le
+        // motif d'echec de la tentative precedente.
+        const metaActuelle: Record<string, unknown> = ((await prisma.transaction.findUnique({ where: { id: transactionId }, select: { metadata: true } }).catch(() => null))?.metadata as Record<string, unknown> | null) || existingMeta;
 
-            // Skip the PayDunya gateway if it was already attempted in the SoftPay block above
-            if (paydunyaAttempted && trialGwId === gatewayId) {
-                continue;
-            }
+        if (issue.issue === 'ACCEPTEE') {
+            const trialGateway = issue.candidat;
+            const initResponse = issue.reponse;
+            const trialGwId = trialGateway.id;
+            const trialConfig = ((trialGateway as any).config as any) || {};
 
-            attempts++;
+            const hub2OtpRequired = !!initResponse.rawData?._hub2_otp_required;
+            // Tout fournisseur peut demander un code a saisir chez nous (`_otp_requis`).
+            const codeRequis = hub2OtpRequired || !!initResponse.rawData?._otp_requis;
+            const hub2PaymentId = initResponse.rawData?._hub2_payment_id;
 
-            // Fetch gateway record (already have it for primary)
-            let trialGateway: any = trialGwId === gatewayId ? gateway : null;
-            if (!trialGateway) {
-                trialGateway = await prisma.gateway.findUnique({ where: { id: trialGwId } }).catch(() => null);
-                if (!trialGateway || trialGateway.status !== 'active') {
-                    console.log(`⏭️ ROUTING: skip ${trialGwId} (not found or inactive)`);
-                    continue;
+            await prisma.transaction.update({
+                where: { id: transactionId },
+                data: {
+                    // Jamais une chaine vide : l'index unique sur providerRef refusait la
+                    // deuxieme transaction « en attente de code » (Orange Money via FeexPay).
+                    providerRef: initResponse.providerReference || null,
+                    provider: trialGateway.name,
+                    metadata: {
+                        ...metaActuelle,
+                        methodCode,
+                        // Point at the gateway that actually won (a fallback may differ from the primary)
+                        gatewayId: trialGwId,
+                        // Sandbox payments are flagged so checkout pages can show a test banner
+                        testMode: (trialConfig?.mode || 'live') === 'test',
+                        // Keep the Hub2 payment id around for the OTP round-trip
+                        ...(hub2OtpRequired && hub2PaymentId ? { _hub2_payment_id: hub2PaymentId } : {}),
+                        // La demande qui vient de partir : sert a ne pas en renvoyer une par-dessus (1c).
+                        dernierEnvoi: dernierEnvoi({
+                            methode: methodCode,
+                            telephone: String(customerDetails?.phone || ''),
+                            pousse: !initResponse.checkoutUrl && !codeRequis && initResponse.status !== 'SUCCESS',
+                            rawData: initResponse.rawData,
+                        }),
+                    },
                 }
-                // Meme regle que la passerelle primaire : seulement une passerelle de
-                // l'espace. Les identifiants sont publics (la page de paiement les
-                // envoie) : sans ce controle, une configuration de routage faisait
-                // encaisser avec les cles d'un autre marchand.
-                if (!trialGateway.applicationId || trialGateway.applicationId !== transaction.applicationId) {
-                    console.log(`⏭️ ROUTING: skip ${trialGwId} (passerelle d'un autre espace)`);
-                    continue;
-                }
-            }
+            });
 
-            const trialProviderKey = detectProviderKey(trialGateway.name);
-
-            // Stripe ne sait encaisser QUE la carte : le tenter en bascule pour
-            // du mobile money ne peut jamais reussir et fait remonter au client
-            // une erreur anglaise hors sujet. On le saute pour ces methodes.
-            const isCardMethodCode = /card|visa|master|carte|amex|apple|google|klarna|ideal|sofort|giropay|bancontact|sepa|stripe/i.test(methodCode || '');
-            if (trialProviderKey === 'stripe' && !isCardMethodCode) {
-                console.log(`⏭️ ROUTING: skip Stripe pour methode mobile money (${methodCode})`);
-                continue;
-            }
-
-            const trialConfig = trialGateway.config as any || {};
-            const trialAdapterConfig = buildAdapterConfig(trialGateway, trialConfig, trialProviderKey);
-            const trialPaymentRequest: PaymentRequest = {
-                ...basePaymentRequest,
-                callbackUrl: `${baseUrl}/api/webhooks/${trialProviderKey}`,
-                metadata: { ...basePaymentRequest.metadata, methodCode }
-            };
-
-            const isFallback = trialGwId !== gatewayId;
-            if (isFallback) {
-                console.log(`🔄 [${engineConfig.algorithmKind}] Fallback attempt ${attempts}/${maxAttempts}: ${trialGateway.name}`);
-            }
-
-            try {
-                const trialAdapter = PaymentOrchestratorFactory.getProvider(trialProviderKey, trialAdapterConfig);
-                const initResponse = await trialAdapter.initiatePayment(trialPaymentRequest);
-
-                if (initResponse.status === 'FAILED') {
-                    lastError = extractProviderErrorMessage(initResponse.rawData) || `${trialGateway.name} FAILED`;
-                    if (!isFallback && !erreurPrincipale) erreurPrincipale = lastError;
-                    console.error(`❌ [${trialProviderKey}] initiate failed: ${lastError}`, initResponse.rawData);
-
-                    // Update dynamic routing score (failure)
-                    if (engineConfig.algorithmKind === 'DYNAMIC') {
-                        currentSuccessScores = updateSuccessScore(currentSuccessScores, trialGwId, false);
-                        await persistSuccessScores(transaction.applicationId!, currentSuccessScores);
-                    }
-
-                    await (prisma as any).providerLog.create({
-                        data: {
-                            transactionId,
-                            type: isFallback ? 'FALLBACK_FAILED' : 'INITIATE_FAILED',
-                            payload: {
-                                provider: trialProviderKey,
-                                gatewayId: trialGwId,
-                                algorithm: engineConfig.algorithmKind,
-                                attempt: attempts,
-                                error: lastError
-                            }
-                        }
-                    }).catch(() => {});
-
-                    // Ce que l'echec dit au ROUTEUR. Une panne du fournisseur
-                    // remplit son seau et justifie d'essayer ailleurs ; un refus
-                    // de la banque du client ou un numero invalide ne se rattrape
-                    // nulle part, et insister ne fait que retarder le message
-                    // que l'acheteur attend.
-                    const verdict = await categoriserEchec(trialProviderKey, initResponse.rawData);
-                    enregistrerIssue({
-                        contexte: contexteMesure, passerelle: trialProviderKey,
-                        reussi: false, categorie: verdict.categorie,
-                    }).catch(() => { });
-                    if (verdict.decision === "ARRETER") {
-                        if (verdict.message) {
-                            lastError = verdict.message;
-                            if (!isFallback) erreurPrincipale = verdict.message;
-                        }
-                        console.warn(`⛔ [${trialProviderKey}] ${verdict.categorie} : inutile de tenter une autre passerelle`);
-                        break;
-                    }
-                    continue;
-                }
-
-                // ── Success ──
-
-                // Update dynamic routing score (success)
-                if (engineConfig.algorithmKind === 'DYNAMIC') {
-                    currentSuccessScores = updateSuccessScore(currentSuccessScores, trialGwId, true);
-                    await persistSuccessScores(transaction.applicationId!, currentSuccessScores);
-                }
-
-                const hub2OtpRequired = !!initResponse.rawData?._hub2_otp_required;
-                // Tout fournisseur peut demander un code a saisir chez nous (`_otp_requis`).
-                const codeRequis = hub2OtpRequired || !!initResponse.rawData?._otp_requis;
-                const hub2PaymentId = initResponse.rawData?._hub2_payment_id;
-
-                await prisma.transaction.update({
-                    where: { id: transactionId },
-                    data: {
-                        // Jamais une chaine vide : l'index unique sur providerRef refusait la
-                        // deuxieme transaction « en attente de code » (Orange Money via FeexPay).
-                        providerRef: initResponse.providerReference || null,
-                        provider: trialGateway.name,
-                        metadata: {
-                            ...existingMeta,
-                            methodCode,
-                            // Point at the gateway that actually won (a fallback may differ from the primary)
-                            gatewayId: trialGwId,
-                            // Sandbox payments are flagged so checkout pages can show a test banner
-                            testMode: (trialConfig?.mode || 'live') === 'test',
-                            // Keep the Hub2 payment id around for the OTP round-trip
-                            ...(hub2OtpRequired && hub2PaymentId ? { _hub2_payment_id: hub2PaymentId } : {}),
-                        },
-                    }
-                });
-
-                await (prisma as any).providerLog.create({
-                    data: {
-                        transactionId,
-                        type: isFallback ? 'FALLBACK_SUCCESS' : 'INITIATE_SUCCESS',
-                        payload: {
-                            provider: trialProviderKey,
-                            gatewayId: trialGwId,
-                            algorithm: engineConfig.algorithmKind,
-                            attempt: attempts,
-                            ref: initResponse.providerReference,
-                            hasRedirect: !!initResponse.checkoutUrl
-                        }
-                    }
-                }).catch(() => {});
-
-                // Code de confirmation : l'acheteur le saisit sur notre page
-                if (codeRequis) {
-                    return NextResponse.json({
-                        success: true,
-                        status: 'REQUIRE_OTP',
-                        // Consigne et code USSD (Orange : #144*82# en CI) affiches par le widget
-                        // et la page, au lieu d'un champ de code sans explication.
-                        message: (initResponse.rawData as any)?._hub2_otp_message || (initResponse.rawData as any)?._instructions || undefined,
-                        ussdCode: (initResponse.rawData as any)?._hub2_otp_ussd || (initResponse.rawData as any)?._otp_ussd || undefined,
-                        providerReference: initResponse.providerReference,
-                        provider: trialGateway.name,
-                        algorithm: engineConfig.algorithmKind,
-                        rawData: brut(initResponse.rawData)
-                    });
-                }
-
-                // Succes immediat (Qosic...) : la finalisation ecrit le statut ET fait
-                // partir courriels, notification et webhook marchand. Avant, seuls les
-                // courriels partaient et la transaction restait PENDING jusqu'au cron.
-                const isDirectSuccess = !initResponse.checkoutUrl && initResponse.status === 'SUCCESS';
-                if (isDirectSuccess) {
-                    await applyVerificationResult({ ...transaction, provider: trialGateway.name, providerRef: initResponse.providerReference || null }, initResponse, "initiate:direct").catch(() => {});
-                }
-
-                // Lien d'application (Wave, Djamo) : l'acheteur reste sur NOTRE page,
-                // qui affiche le bouton d'ouverture et un QR code, et surveille l'etat.
-                const application = initResponse.rawData?._application;
-                if (initResponse.checkoutUrl && application) {
-                    const qr = await qrCartflox(initResponse.checkoutUrl, 480).catch(() => null);
-                    return NextResponse.json({
-                        success: true,
-                        status: 'APP_LINK',
-                        application,
-                        redirectUrl: initResponse.checkoutUrl,
-                        qr,
-                        providerReference: initResponse.providerReference,
-                        provider: trialGateway.name,
-                        algorithm: engineConfig.algorithmKind,
-                        rawData: brut(initResponse.rawData)
-                    });
-                }
-
-                // Redirect flow
-                if (initResponse.checkoutUrl) {
-                    return NextResponse.json({
-                        success: true,
-                        status: 'REDIRECT',
-                        redirectUrl: initResponse.checkoutUrl,
-                        providerReference: initResponse.providerReference,
-                        provider: trialGateway.name,
-                        algorithm: engineConfig.algorithmKind,
-                        rawData: brut(initResponse.rawData)
-                    });
-                }
-
-                // USSD push / direct charge
+            // Code de confirmation : l'acheteur le saisit sur notre page
+            if (codeRequis) {
                 return NextResponse.json({
                     success: true,
-                    status: initResponse.status,
+                    status: 'REQUIRE_OTP',
+                    // Consigne et code USSD (Orange : #144*82# en CI) affiches par le widget
+                    // et la page, au lieu d'un champ de code sans explication.
+                    message: (initResponse.rawData as any)?._hub2_otp_message || (initResponse.rawData as any)?._instructions || undefined,
+                    ussdCode: (initResponse.rawData as any)?._hub2_otp_ussd || (initResponse.rawData as any)?._otp_ussd || undefined,
                     providerReference: initResponse.providerReference,
                     provider: trialGateway.name,
                     algorithm: engineConfig.algorithmKind,
                     rawData: brut(initResponse.rawData)
                 });
-
-            } catch (err: any) {
-                lastError = err.message || 'Exception';
-                if (!isFallback && !erreurPrincipale) erreurPrincipale = lastError;
-
-                if (engineConfig.algorithmKind === 'DYNAMIC') {
-                    currentSuccessScores = updateSuccessScore(currentSuccessScores, trialGwId, false);
-                    await persistSuccessScores(transaction.applicationId!, currentSuccessScores);
-                }
-
-                await (prisma as any).providerLog.create({
-                    data: {
-                        transactionId,
-                        type: 'PROVIDER_EXCEPTION',
-                        payload: {
-                            provider: trialProviderKey,
-                            gatewayId: trialGwId,
-                            algorithm: engineConfig.algorithmKind,
-                            attempt: attempts,
-                            error: lastError
-                        }
-                    }
-                }).catch(() => {});
-                continue;
             }
+
+            // Succes immediat (Qosic...) : la finalisation ecrit le statut ET fait
+            // partir courriels, notification et webhook marchand. Avant, seuls les
+            // courriels partaient et la transaction restait PENDING jusqu'au cron.
+            const isDirectSuccess = !initResponse.checkoutUrl && initResponse.status === 'SUCCESS';
+            if (isDirectSuccess) {
+                await applyVerificationResult({ ...transaction, provider: trialGateway.name, providerRef: initResponse.providerReference || null }, initResponse, "initiate:direct").catch(() => {});
+            }
+
+            // Lien d'application (Wave, Djamo) : l'acheteur reste sur NOTRE page,
+            // qui affiche le bouton d'ouverture et un QR code, et surveille l'etat.
+            const application = initResponse.rawData?._application;
+            if (initResponse.checkoutUrl && application) {
+                const qr = await qrCartflox(initResponse.checkoutUrl, 480).catch(() => null);
+                return NextResponse.json({
+                    success: true,
+                    status: 'APP_LINK',
+                    application,
+                    redirectUrl: initResponse.checkoutUrl,
+                    qr,
+                    providerReference: initResponse.providerReference,
+                    provider: trialGateway.name,
+                    algorithm: engineConfig.algorithmKind,
+                    rawData: brut(initResponse.rawData)
+                });
+            }
+
+            // Redirect flow
+            if (initResponse.checkoutUrl) {
+                return NextResponse.json({
+                    success: true,
+                    status: 'REDIRECT',
+                    redirectUrl: initResponse.checkoutUrl,
+                    providerReference: initResponse.providerReference,
+                    provider: trialGateway.name,
+                    algorithm: engineConfig.algorithmKind,
+                    rawData: brut(initResponse.rawData)
+                });
+            }
+
+            // USSD push / direct charge
+            return NextResponse.json({
+                success: true,
+                status: initResponse.status,
+                providerReference: initResponse.providerReference,
+                provider: trialGateway.name,
+                algorithm: engineConfig.algorithmKind,
+                rawData: brut(initResponse.rawData)
+            });
+        }
+
+        if (issue.issue === 'INCERTAINE') {
+            // Le fournisseur n'a pas repondu a temps : la demande a PU partir et attendre
+            // sur le telephone. On ne renvoie rien ailleurs. La reference est gardee quand
+            // elle permet de relire l'etat (PawaPay : identifiant de depot) ; le cron
+            // /api/cron/sync-pending relit les tentatives incertaines apres deux minutes.
+            const verifiable = VERIFIABLES_PAR_NOTRE_REFERENCE.has(issue.candidat.cle);
+            await prisma.transaction.update({
+                where: { id: transactionId },
+                data: {
+                    provider: issue.candidat.name,
+                    ...(verifiable ? { providerRef: issue.reference } : {}),
+                    metadata: {
+                        ...metaActuelle,
+                        methodCode,
+                        gatewayId: issue.candidat.id,
+                        dernierEnvoi: dernierEnvoi({ methode: methodCode, telephone: String(customerDetails?.phone || ''), pousse: true, incertain: true }),
+                    },
+                },
+            }).catch(() => { });
+            console.warn(`⏳ CHECKOUT_INITIATE INCERTAIN: tx=${transactionId} ${issue.candidat.name} : ${issue.motif}`);
+            return NextResponse.json({
+                success: true,
+                status: 'PENDING',
+                incertain: true,
+                providerReference: verifiable ? issue.reference : null,
+                provider: issue.candidat.name,
+                algorithm: engineConfig.algorithmKind,
+                message: "Le fournisseur n'a pas confirmé la demande à temps. Si une demande s'affiche sur votre téléphone, validez-la ; sinon patientez un instant avant de réessayer.",
+                rawData: {},
+            });
         }
 
         // All attempts exhausted
+        // L'acheteur a choisi UN moyen : si celui-la echoue, c'est SON motif qu'il doit
+        // lire, pas celui d'une passerelle de secours qu'il n'a jamais demandee (un
+        // refus de carte se lisait « Minimum checkout amount is 200 FCFA », message
+        // d'un fournisseur Mobile Money essaye ensuite).
+        const lastError = issue.dernierMotif;
+        const erreurPrincipale = motifPaydunya || issue.motifPrincipal;
         const motifMontre = erreurPrincipale || lastError;
-        console.error(`🚨 CHECKOUT_INITIATE FAILED: tx=${transactionId} gw=${gatewayId} method=${methodCode} error=${motifMontre || 'unknown'}${erreurPrincipale && erreurPrincipale !== lastError ? ` (secours: ${lastError})` : ''}`);
+        console.error(`🚨 CHECKOUT_INITIATE FAILED: tx=${transactionId} gw=${gatewayId} method=${methodCode} tentatives=${issue.tentatives} error=${motifMontre || 'unknown'}${erreurPrincipale && erreurPrincipale !== lastError ? ` (secours: ${lastError})` : ''}`);
         // Une cle refusee par l'agregateur n'est pas un echec du payeur : le marchand
         // doit le savoir tout de suite, dans son tableau de bord, pas dans un journal serveur.
-        if (/identifiants|authentication|unauthori[sz]ed|invalid (api |secret |private |public )?(key|token|credential)|cl[eé] (api )?(invalide|refus)|forbidden|access denied|activer votre compte|compte (n'est )?(pas |non )activ|account (is )?not (yet )?activ|not activated/i.test(lastError)) {
-            prevenirClesRefusees(transaction.applicationId, gateway.name, lastError).catch(() => {});
+        if (issue.identifiantsRefuses || IDENTIFIANTS_REFUSES.test(lastError)) {
+            prevenirClesRefusees(transaction.applicationId, issue.identifiantsRefusesChez?.name || gateway.name, lastError).catch(() => {});
+        }
+        // Tous les essais ont bute sur un operateur ferme : le moyen est indisponible,
+        // la page le grise au lieu d'afficher un echec.
+        if (issue.operateurFerme && !issue.autreEchec && !motifPaydunya) {
+            return NextResponse.json({
+                success: false, indisponible: true, status: 'UNAVAILABLE', moyen: vise?.libelle,
+                message: `${vise?.libelle || 'Ce moyen de paiement'} est momentanément indisponible. Choisissez un autre moyen de paiement ou réessayez dans quelques minutes.`,
+            }, { status: 503 });
         }
         return NextResponse.json({
             success: false,
@@ -991,6 +926,8 @@ export async function POST(req: NextRequest) {
             message: "Une erreur technique est survenue de notre côté. Réessayez dans un instant.",
             code: "internal",
         }, { status: 500 });
+    } finally {
+        if (verrouPose && transactionVerrouillee) await leverVerrou(transactionVerrouillee);
     }
 }
 
@@ -1053,16 +990,6 @@ async function sendPaymentNotifications(
     } catch (err) {
         console.error('[sendPaymentNotifications]', err);
     }
-}
-
-/** Persist updated success scores back to DB (DYNAMIC routing) */
-async function persistSuccessScores(applicationId: string, scores: Record<string, number>) {
-    try {
-        await (prisma as any).routingConfig.update({
-            where: { applicationId },
-            data: { successScores: scores }
-        });
-    } catch { }
 }
 
 /**

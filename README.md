@@ -47,11 +47,12 @@ Puis, dans `.env` : `KEY_VAULTS_SECRET="file:/etc/cartflox/master.key"`. Perdre 
 
 ### Tâches planifiées
 
-Quatre appels HTTP à programmer (cron, systemd timer...), authentifiés par `CRON_SECRET` dans l'en-tête `x-cron-secret` (sans `CRON_SECRET`, ces routes refusent tout) :
+Cinq appels HTTP à programmer (cron, systemd timer...), authentifiés par `CRON_SECRET` dans l'en-tête `x-cron-secret` (sans `CRON_SECRET`, ces routes refusent tout) :
 
 | Fréquence | Appel | Rôle |
 |---|---|---|
-| toutes les 10 min | `GET /api/cron/sync-pending` | relit l'état des paiements en attente chez les agrégateurs, abandonne au-delà de 30 min |
+| toutes les 10 min | `GET /api/cron/sync-pending` | relit l'état des paiements en attente chez les agrégateurs et les tentatives restées sans réponse, abandonne au-delà de 30 min |
+| toutes les 2 min | `GET /api/cron/sante-moyens` | relit la disponibilité publiée par PawaPay : un opérateur fermé se grise sur la page de paiement et le routeur l'évite |
 | toutes les 10 min | `GET /api/cron/sync-transferts` | idem pour les transferts sortants |
 | toutes les 5 min | `GET /api/cron/webhooks-retry` | rejoue les webhooks non livrés pendant 72 h |
 | une fois par jour | `GET /api/cron/purge-tests` | efface les données de test anciennes |
@@ -59,6 +60,18 @@ Quatre appels HTTP à programmer (cron, systemd timer...), authentifiés par `CR
 ```
 */10 * * * * curl -fsS -H "x-cron-secret: $CRON_SECRET" https://votre-domaine/api/cron/sync-pending
 ```
+
+### Comment un paiement est routé
+
+Le routage s'inspire de [Hyperswitch](https://github.com/juspay/hyperswitch) (`src/lib/orchestrator/`) :
+
+- **Le routeur** (`routeur.ts`) garde d'abord les passerelles éligibles (actives, de l'espace, qui servent ce moyen dans ce pays, moyen pas en panne chez elles), applique ensuite l'ordre du marchand (affectation d'un moyen, algorithme unique, priorité, répartition par volume, règles ou dynamique, liste de secours), puis le classe sur les taux de réussite mesurés.
+- **Chaque essai est une tentative** (`tentatives.ts`, table `Tentative`) avec sa propre référence posée avant l'appel : un paiement accepté par une passerelle remplacée ensuite reste retrouvable par son webhook.
+- **Chaque refus est classé** (`categorie-echec.ts`, table `CodeFournisseur` modifiable sans déploiement) : refus du client (on s'arrête), panne du fournisseur ou clé refusée (on tente la passerelle suivante), délai dépassé (la demande a pu partir : on ne renvoie rien ailleurs, on vérifie).
+- **La mesure** (`mesure-fenetre.ts`, `routage-mesure.ts`, table `RoutageMesure`) garde les dernières issues par pays, opérateur et devise, pour le fournisseur et pour chaque compte, et écarte un temps une passerelle en panne.
+- **Un seul chemin à la fois** par paiement (`verrou-initiation.ts`) : deux clics rapprochés n'envoient pas deux demandes.
+
+Tests : `npm test` (unitaires), et avec une base de développement `DATABASE_URL=... npx vitest run base.integration`.
 
 ### Webhooks entrants des agrégateurs
 

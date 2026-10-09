@@ -8,6 +8,7 @@ import {
     PayoutResponse
 } from '../types';
 import { DEVISES_SANS_CENTIMES } from '@/lib/devises';
+import { CODES_OPERATEUR_FERME } from '@/lib/orchestrator/sante-moyens';
 import { getPawaPayActiveCorrespondents } from "@/lib/orchestrator/pawapay-availability";
 
 /**
@@ -95,7 +96,10 @@ function phraserConsigne(manuel: boolean, etapes: string[]): string | null {
         .map((e, i) => (i === 0 ? e : e.charAt(0).toLowerCase() + e.slice(1)));
     if (pas.length === 0) return null;
     const suite = pas.length === 1 ? pas[0] : `${pas.slice(0, -1).join(', ')}, puis ${pas[pas.length - 1]}`;
-    return `${manuel ? "Rien n'est envoyé automatiquement sur votre téléphone. " : "Une demande de validation arrive sur votre téléphone. Si elle n'apparaît pas : "}${suite}.`;
+    // Apres « Si elle n'apparait pas : », la suite reprend en minuscule.
+    return manuel
+        ? `Rien n'est envoyé automatiquement sur votre téléphone. ${suite}.`
+        : `Une demande de validation arrive sur votre téléphone. Si elle n'apparaît pas : ${suite.charAt(0).toLowerCase()}${suite.slice(1)}.`;
 }
 
 const FORCE_PAGE_FIRST = new Set<string>([
@@ -183,6 +187,8 @@ export class PawaPayAdapter implements IPaymentProvider {
      * marchand etait refusee : le payeur ne comprenait rien, le marchand non plus.
      */
     private derniereErreur: string | null = null;
+    /** Le dernier appel n'a pas répondu à temps : la demande a pu arriver chez PawaPay sous ce depositId. */
+    private delaiDepasse = false;
 
     constructor(config: PawaPayConfig) {
         this.config = { ...config, mode: config.mode || 'live' };
@@ -197,6 +203,7 @@ export class PawaPayAdapter implements IPaymentProvider {
      */
     async initiatePayment(request: PaymentRequest): Promise<PaymentResponse> {
         this.derniereErreur = null;
+        this.delaiDepasse = false;
         const depositId = request.metadata?.depositId || crypto.randomUUID();
         const phone = sanitizeMsisdn(request.customerPhone || '');
         const countryAlpha2 = (request.metadata?.country || '').toUpperCase();
@@ -240,6 +247,10 @@ export class PawaPayAdapter implements IPaymentProvider {
         for (const attempt of attempts) {
             const result = await attempt();
             if (result) return result;
+            // Délai dépassé (09/10/2026) : la demande a pu arriver chez PawaPay sous ce
+            // depositId. On n'en envoie pas une autre par-dessus (page de paiement ou dépôt
+            // direct) : le routeur classe la tentative INCERTAINE et la relit par son depositId.
+            if (this.delaiDepasse) break;
         }
 
         return {
@@ -249,6 +260,7 @@ export class PawaPayAdapter implements IPaymentProvider {
             rawData: {
                 error: this.derniereErreur || `PawaPay: aucune methode disponible (country=${countryAlpha2} method=${methodCode})`,
                 code: this.derniereErreur && /identifiants/i.test(this.derniereErreur) ? 'AUTHENTICATION_ERROR' : undefined,
+                ...(this.delaiDepasse ? { _delai: true } : {}),
             },
         };
     }
@@ -305,6 +317,7 @@ export class PawaPayAdapter implements IPaymentProvider {
         } catch (err: any) {
             console.error(`[PawaPay] v2 PaymentPage exception: ${err.message}`);
             this.derniereErreur = `PawaPay injoignable : ${err.message}`;
+            this.delaiDepasse = err?.name === 'TimeoutError' || err?.name === 'AbortError';
             return null;
         }
     }
@@ -328,8 +341,13 @@ export class PawaPayAdapter implements IPaymentProvider {
         }
     }
 
-    /** Consigne en francais pour l'acheteur, selon l'operateur (voir CONSIGNES_STATIQUES). */
-    private async consigneOperateur(correspondent: string | undefined, currency?: string): Promise<string | null> {
+    /**
+     * Consigne en francais pour l'acheteur, selon l'operateur (voir CONSIGNES_STATIQUES),
+     * et le code USSD a composer quand la demande n'arrive pas (*126# chez MTN Cameroun) :
+     * la page l'affiche en grand, avec un bouton qui ouvre le clavier du telephone.
+     */
+    private async consigneOperateur(correspondent: string | undefined, currency?: string): Promise<{ phrase: string; code: string | null } | null> {
+        const codeDe = (variables: any, etapes: string[]) => String(variables?.shortCode || (etapes.join(' ').match(/[*#][0-9*#]{2,}#/) || [])[0] || '') || null;
         const code = String(correspondent || '').toUpperCase();
         if (!code) return null;
         const conf = await this.configurationActive();
@@ -341,10 +359,11 @@ export class PawaPayAdapter implements IPaymentProvider {
             const canal = depot?.pinPromptInstructions?.channels?.[0];
             const etapes = (canal?.instructions?.fr || canal?.instructions?.en || []).map((i: any) => i?.text).filter(Boolean);
             const phrase = phraserConsigne(depot?.pinPrompt === 'MANUAL', etapes);
-            if (phrase) return phrase;
+            if (phrase) return { phrase, code: codeDe(canal?.variables, etapes) };
         }
         const statique = CONSIGNES_STATIQUES[code];
-        return statique ? phraserConsigne(statique.manuel, statique.etapes) : null;
+        const phrase = statique ? phraserConsigne(statique.manuel, statique.etapes) : null;
+        return phrase ? { phrase, code: codeDe(null, statique!.etapes) } : null;
     }
 
     /** v1 Direct Deposit (push USSD). Renvoie null si non résolu/refusé → repli PaymentPage. */
@@ -393,6 +412,14 @@ export class PawaPayAdapter implements IPaymentProvider {
             if (!res.ok || data.status === 'REJECTED') {
                 console.error(`[PawaPay] v1 Direct Deposit FAILED: status=${res.status} body=${JSON.stringify(data)}`);
                 this.derniereErreur = this.libellerErreur(res.status, data);
+                // Operateur ferme chez PawaPay (25/09/2026) : sa page de paiement passe
+                // par le meme operateur et ne peut pas aboutir non plus. On s'arrete
+                // ici, sans redirection : le routeur essaie une autre passerelle, ou le
+                // moyen se grise dans la page (lib/orchestrator/sante-moyens.ts).
+                const codeRefus = String(data?.rejectionReason?.rejectionCode || '').toUpperCase();
+                if (CODES_OPERATEUR_FERME.has(codeRefus)) {
+                    return { transactionId: depositId, providerReference: depositId, status: 'FAILED', rawData: { ...data, _operateurFerme: true } };
+                }
                 return null;
             }
 
@@ -401,11 +428,12 @@ export class PawaPayAdapter implements IPaymentProvider {
                 transactionId: depositId,
                 providerReference: depositId,
                 status: this.mapStatus(data.status),
-                rawData: consigne ? { ...data, _instructions: consigne } : data,
+                rawData: consigne ? { ...data, _instructions: consigne.phrase, ...(consigne.code ? { _ussd: consigne.code } : {}) } : data,
             };
         } catch (error: any) {
             console.error(`[PawaPay] v1 Direct Deposit exception: ${error.message}`);
             this.derniereErreur = `PawaPay injoignable : ${error.message}`;
+            this.delaiDepasse = error?.name === 'TimeoutError' || error?.name === 'AbortError';
             return null;
         }
     }
@@ -435,7 +463,7 @@ export class PawaPayAdapter implements IPaymentProvider {
                 transactionId: providerReference,
                 providerReference,
                 status,
-                rawData: consigne ? { ...record, _instructions: consigne } : record,
+                rawData: consigne ? { ...record, _instructions: consigne.phrase, ...(consigne.code ? { _ussd: consigne.code } : {}) } : record,
             };
         } catch (error: any) {
             return {

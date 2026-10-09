@@ -90,11 +90,33 @@ const MESSAGES_FEEXPAY: [RegExp, string][] = [
     [/^HTTP 502$|Bad Gateway/i, "FeexPay n'a pas pu joindre l'opérateur (erreur 502) : réessayez dans un instant"],
     [/^HTTP 503$/i, "Réseau en maintenance chez FeexPay : réessayez plus tard"],
 ];
+/**
+ * Le motif d'un paiement que FeexPay declare ECHOUE, pour `rawData.message`.
+ * Jamais `rawData.error` : la finalisation (applyVerificationResult) prend
+ * toute reponse portant `error` pour une panne de transport et ne change
+ * rien, donc un vrai echec restait « en attente » jusqu'aux 24 h (26/09/2026).
+ */
+function motifEchecFeexPay(data: any): string {
+    const m = messageFeexPay(data);
+    const vide = /^FeexPay : (FAILED|failed|échec)$/i.test(m) || m === "FeexPay a refusé la demande sans détail";
+    return vide ? "Le paiement n'a pas abouti chez l'opérateur." : m;
+}
+
 function messageFeexPay(data: any, httpStatus?: number): string {
     const brut = String(data?.reason || data?.message || data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || data?.code || (httpStatus ? `HTTP ${httpStatus}` : '')).trim();
     for (const [motif, texte] of MESSAGES_FEEXPAY) if (motif.test(brut)) return texte;
     if (brut && !/^HTTP \d+$/.test(brut)) return `FeexPay : ${brut}`;
     return httpStatus ? `FeexPay a répondu ${httpStatus}` : 'FeexPay a refusé la demande sans détail';
+}
+
+/**
+ * FeexPay refuse une description deja vue dans la boutique (« Une description
+ * identique existe deja », DUPLICATE_DESCRIPTION) : un nouvel essai sur la meme
+ * commande, ou le secours d'une autre passerelle, echouait donc a coup sur. Chaque
+ * essai porte la sienne, tiree de son identifiant (horodate a la milliseconde).
+ */
+function descriptionFeexPay(orderId: string, customId: string): string {
+    return `Commande ${orderId} ${customId.slice(-6)}`.replace(/[^\w\s-]/g, '').trim() || 'Paiement';
 }
 
 export class FeexPayAdapter implements IPaymentProvider {
@@ -133,7 +155,7 @@ export class FeexPayAdapter implements IPaymentProvider {
             phoneNumber: chiffres,
             first_name: prenom,
             last_name: reste.join(' ') || prenom,
-            description: `Commande ${request.orderId}`.replace(/[^\w\s-]/g, ''),
+            description: descriptionFeexPay(request.orderId, customId),
             callback_info: request.orderId,
             return_url: request.returnUrl,
             cancel_url: request.cancelUrl || request.returnUrl,
@@ -186,7 +208,7 @@ export class FeexPayAdapter implements IPaymentProvider {
         const corps = {
             shop: this.config.shopId,
             amount: Math.round(request.amount),
-            description: (`Commande ${request.orderId}`.replace(/[^\w\s-]/g, '') || 'Paiement'),
+            description: descriptionFeexPay(request.orderId, customId),
             paymentMethod,
             range: 1,
             expireIn: 60,
@@ -273,7 +295,7 @@ export class FeexPayAdapter implements IPaymentProvider {
                 transactionId: data.externalId || providerReference,
                 providerReference: data.financialTransactionId || providerReference,
                 status,
-                rawData: status === 'FAILED' ? { ...data, error: messageFeexPay(data) } : data,
+                rawData: status === 'FAILED' ? { ...data, message: motifEchecFeexPay(data) } : data,
             };
         } catch (error: any) {
             return {
@@ -329,7 +351,7 @@ export class FeexPayAdapter implements IPaymentProvider {
                     network: data.reseau,
                     amount: data.amount,
                     failureReason: data.reason,
-                    ...(status === 'FAILED' ? { error: messageFeexPay(data) } : {}),
+                    ...(status === 'FAILED' ? { message: motifEchecFeexPay(data) } : {}),
                 },
             };
         } catch (error: any) {

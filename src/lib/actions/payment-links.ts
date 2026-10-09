@@ -280,6 +280,7 @@ export async function getPaymentLinkBySlug(slug: string) {
             theme: {
                 id: (app.metadata as any)?.checkoutTheme || null,
                 perso: (app.metadata as any)?.checkoutThemeCustom || null,
+                style: (app.metadata as any)?.checkoutStyle || null,
             },
         };
     } catch (error) {

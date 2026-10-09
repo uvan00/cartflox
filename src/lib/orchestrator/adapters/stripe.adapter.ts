@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import { DEVISES_SANS_CENTIMES, STRIPE_SANS_DECIMALES } from '@/lib/devises';
 import {
     IPaymentProvider,
     PaymentRequest,
@@ -48,10 +49,10 @@ export class StripeAdapter implements IPaymentProvider {
      * Convert amount to smallest unit (cents for USD/EUR, etc.)
      */
     private toSmallestUnit(amount: number, currency: string): number {
-        const zeroDecimalCurrencies = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VUV', 'VND', 'XAF', 'XOF', 'XPF'];
-        if (zeroDecimalCurrencies.includes(currency.toUpperCase())) {
-            return Math.round(amount);
-        }
+        const devise = currency.toUpperCase();
+        if (STRIPE_SANS_DECIMALES.has(devise)) return Math.round(amount);
+        // Sans décimales chez nous mais pas pour l'API de Stripe (ISK, UGX) : unités entières, en centièmes.
+        if (DEVISES_SANS_CENTIMES.has(devise)) return Math.round(amount) * 100;
         return Math.round(amount * 100);
     }
 
@@ -59,11 +60,7 @@ export class StripeAdapter implements IPaymentProvider {
      * Convert from smallest unit to main unit
      */
     private fromSmallestUnit(amount: number, currency: string): number {
-        const zeroDecimalCurrencies = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VUV', 'VND', 'XAF', 'XOF', 'XPF'];
-        if (zeroDecimalCurrencies.includes(currency.toUpperCase())) {
-            return amount;
-        }
-        return amount / 100;
+        return STRIPE_SANS_DECIMALES.has(currency.toUpperCase()) ? amount : amount / 100;
     }
 
     /**

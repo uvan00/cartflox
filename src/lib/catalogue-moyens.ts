@@ -10,6 +10,19 @@
  */
 
 
+/**
+ * Cartes Stripe, une ligne par devise de paiement (« Visa / MasterCard XOF »).
+ * Le marchand choisit les devises ou il accepte la carte ; la page de paiement
+ * ne montre que la ligne de la devise du paiement, et une devise sans ligne
+ * passe par la ligne USD. La devise encaissee ne change pas pour autant : la
+ * zone franc reste encaissee en euros (voir l'initiation).
+ */
+export const DEVISES_CARTE_STRIPE = ["XOF", "XAF", "USD", "EUR", "GHS", "NGN", "KES", "ZAR"];
+const CARTES_STRIPE = DEVISES_CARTE_STRIPE.map((d) => ({
+    name: `Visa / MasterCard ${d}`, country: "Global", flag: "", type: "CARD",
+    code: `card-${d.toLowerCase()}-stripe`, devise: d, logo: "/icons/methods/credit_card.svg",
+}));
+
 // Comprehensive mapping of what each provider supports
 // Using official logos from the PayDunya catalog
 export const PROVIDER_METHODS: Record<string, any[]> = {
@@ -37,13 +50,18 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
 
         // Togo
         { name: "T-Money Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "t-money-togo", logo: "/icons/methods/togocel.svg" },
-        { name: "Flooz Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "flooz-togo", logo: "/icons/methods/togocel.svg" },
+        // Flooz est le portefeuille de Moov Africa Togo : logo Moov, comme chez les autres passerelles.
+        { name: "Flooz Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "flooz-togo", logo: "/icons/methods/moov_money.svg" },
         { name: "Moov Togo", country: "Togo", flag: "TG", type: "MOBILE_MONEY", code: "moov-togo", logo: "/icons/methods/moov_money.svg" },
 
         // Burkina Faso
         { name: "Orange Money Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "orange-money-burkina", logo: "/icons/methods/orange_money.svg" },
         { name: "Coris Money Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "coris-money-burkina", logo: "/icons/methods/coris_money.svg" },
         { name: "Moov Burkina", country: "Burkina Faso", flag: "BF", type: "MOBILE_MONEY", code: "moov-burkina-faso", logo: "/icons/methods/moov_money.svg" },
+
+        // Cameroun : MTN seulement, en XAF (SoftPay « mtn-cameroun », doc PayDunya relue
+        // le 25/09/2026 ; Orange Money Cameroun n'existe pas chez PayDunya).
+        { name: "MTN Cameroun", country: "Cameroun", flag: "CM", type: "MOBILE_MONEY", code: "mtn-cameroun", logo: "/icons/methods/momo.svg" },
 
         // Cartes (single entry — PayDunya processes both via 'card' endpoint)
         { name: "Carte Bancaire", country: "UEMOA", flag: "", type: "CARD", code: "card", logo: "/icons/methods/credit_card.svg" },
@@ -149,27 +167,10 @@ export const PROVIDER_METHODS: Record<string, any[]> = {
     'paypal': [
         { name: "PayPal", country: "Global", flag: "", type: "CARD", code: "paypal", logo: "/icons/methods/paypal.svg" },
     ],
-    'stripe': [
-        { name: "Visa / MasterCard", country: "Global", flag: "", type: "CARD", code: "card-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "American Express", country: "Global", flag: "", type: "CARD", code: "amex-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "Apple Pay", country: "Global", flag: "", type: "CARD", code: "apple-pay-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "Google Pay", country: "Global", flag: "", type: "CARD", code: "google-pay-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "SEPA Direct Debit", country: "Europe", flag: "EU", type: "CARD", code: "sepa-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "iDEAL", country: "Pays-Bas", flag: "NL", type: "CARD", code: "ideal-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "Bancontact", country: "Belgique", flag: "BE", type: "CARD", code: "bancontact-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "Giropay", country: "Allemagne", flag: "DE", type: "CARD", code: "giropay-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "Sofort", country: "Europe", flag: "EU", type: "CARD", code: "sofort-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "Klarna", country: "Global", flag: "", type: "CARD", code: "klarna-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "Afterpay / Clearpay", country: "Global", flag: "", type: "CARD", code: "afterpay-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "Alipay", country: "Chine", flag: "CN", type: "CARD", code: "alipay-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "WeChat Pay", country: "Chine", flag: "CN", type: "CARD", code: "wechatpay-stripe", logo: "/icons/methods/credit_card.svg" },
-        { name: "ACH Bank Transfer", country: "États-Unis", flag: "US", type: "CARD", code: "ach-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "EPS", country: "Autriche", flag: "AT", type: "CARD", code: "eps-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "P24", country: "Pologne", flag: "PL", type: "CARD", code: "p24-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "PayNow", country: "Singapour", flag: "SG", type: "CARD", code: "paynow-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "PromptPay", country: "Thaïlande", flag: "TH", type: "CARD", code: "promptpay-stripe", logo: "/icons/methods/bank_transfer.svg" },
-        { name: "BACS Débit", country: "Royaume-Uni", flag: "GB", type: "CARD", code: "bacs-stripe", logo: "/icons/methods/bank_transfer.svg" },
-    ],
+    // Comme Moneroo : une carte PAR DEVISE de paiement, chacune activable. Les
+    // moyens europeens et asiatiques de l'ancienne liste (iDEAL, SEPA, Alipay...)
+    // ne passaient pas par notre page de paiement : ils s'affichaient pour rien.
+    'stripe': CARTES_STRIPE,
     'kkiapay': [
         // Bénin
         { name: "MTN Bénin", country: "Bénin", flag: "BJ", type: "MOBILE_MONEY", code: "mtn-bj-kkiapay", logo: "/icons/methods/momo.svg" },
@@ -564,6 +565,29 @@ export function normalizeCountry(country: string): string {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, ' ')
         .trim();
+}
+
+/** La devise d'une carte par devise (catalogue ou ligne en base « Visa / MasterCard XOF »), sinon null. */
+export function deviseDeLaCarte(m: { name?: string | null; devise?: string | null }): string | null {
+    if (m.devise) return String(m.devise).toUpperCase();
+    const r = /^Visa \/ MasterCard ([A-Z]{3})$/.exec(String(m.name || "").trim());
+    return r && DEVISES_CARTE_STRIPE.includes(r[1]) ? r[1] : null;
+}
+
+/**
+ * Cle d'un moyen pour le dedoublonnage et les moyens desactives : operateur et
+ * pays, plus la devise pour une carte par devise. Sans elle, les huit cartes
+ * Stripe se fondaient en une seule, et en eteindre une les eteignait toutes.
+ */
+export function cleDuMoyen(m: { name: string; country?: string | null; devise?: string | null }): string {
+    const d = deviseDeLaCarte(m);
+    return `${getOperatorKey(m.name)}${d ? ":" + d : ""}||${normalizeCountry(m.country || "")}`;
+}
+
+/** La carte par devise qui sert un paiement dans cette devise (USD si elle n'a pas la sienne). */
+export function deviseCarteVisee(devise?: string | null): string {
+    const d = String(devise || "").toUpperCase();
+    return DEVISES_CARTE_STRIPE.includes(d) ? d : "USD";
 }
 
 /**

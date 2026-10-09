@@ -93,6 +93,20 @@
   }
 }
 
+/* ── Pages de paiement ──
+   Classe posee avant le premier rendu (script de layout.tsx). Le fond est celui
+   de la page du client des le premier octet, jamais le noir du tableau de bord :
+   c'est lui que le navigateur montre avant le squelette, sous la barre d'etat et
+   au rebond du defilement. --fond-paiement suit le theme du marchand. */
+html.page-paiement,
+html.page-paiement body {
+  background-color: var(--fond-paiement, #F4F4F7);
+  color-scheme: light;
+}
+html.page-paiement .fond-decoratif {
+  display: none;
+}
+
 /* ── No animations mode ── */
 .no-animations *,
 .no-animations *::before,

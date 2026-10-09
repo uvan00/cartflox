@@ -129,7 +129,7 @@ export default function MethodesPage() {
                     action={<Link href="/gateways"><Bouton icone={Plug}>Brancher une passerelle</Bouton></Link>} />
             ) : onglet === "moyens" ? (
                 <div className="space-y-4">
-                    <Aide>Un moyen désactivé n&apos;est plus proposé à vos clients. Quand plusieurs passerelles savent servir le même opérateur, choisissez laquelle encaisse, ou laissez Cartflox décider selon le routage.</Aide>
+                    <Aide>Un moyen désactivé n&apos;est plus proposé à vos clients. Quand plusieurs passerelles savent servir le même opérateur, choisissez laquelle encaisse, ou laissez Cartflox décider selon le routage.{(methodes || []).some((m) => /^Visa \/ MasterCard [A-Z]{3}$/.test(m.name)) ? " La carte Stripe se règle par devise : chaque ligne Visa / MasterCard sert les paiements dans sa devise, et un paiement dans une autre devise passe par la ligne USD." : ""}</Aide>
                     {parPays.map(([pays, liste]) => (
                         <Bloc key={pays} titre={<span className="flex items-center gap-2"><Drapeau code={liste[0]?.flag || ""} taille={14} />{pays}</span>} sousTitre={`${liste.filter((m) => m.isActive).length} sur ${liste.length} proposé${liste.length > 1 ? "s" : ""}`}>
                             <div className="divide-y" style={{ borderColor: "var(--dt-divider)" }}>

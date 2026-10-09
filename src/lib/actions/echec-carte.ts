@@ -3,6 +3,7 @@
 import prisma from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
 import logger from "@/lib/logger";
+import { motifEchec } from "@/lib/motif-echec";
 
 /**
  * Le formulaire de carte a refusé le paiement CHEZ L'ACHETEUR (carte refusée par
@@ -31,6 +32,10 @@ export async function journaliserEchecCarte(
         type: String(erreur?.type || "").slice(0, 40) || null,
         message: String(erreur?.message || "").slice(0, 300) || null,
     };
+    // Le motif gardé pour le marchand se lit en français, comme sur la page de paiement.
+    const lisible: { message: string; action?: string } | null = erreur?.type === "validation_error"
+        ? { message: "Il manque une information sur la carte, ou elle est incorrecte." }
+        : motifEchec({ last_payment_error: { decline_code: motif.decline_code, code: motif.code, message: motif.message } });
     logger.info("[carte] paiement refusé chez l'acheteur", { txId: id, provider: tx.provider, ...motif });
 
     await (prisma as any).providerLog.create({
@@ -40,6 +45,6 @@ export async function journaliserEchecCarte(
     const meta = (tx.metadata as any) || {};
     await prisma.transaction.update({
         where: { id },
-        data: { metadata: { ...meta, echec: { ...motif, source: "carte", quand: new Date().toISOString() } } as any },
+        data: { metadata: { ...meta, echec: { ...motif, ...(lisible ? { message: lisible.message, action: lisible.action } : {}), source: "carte", quand: new Date().toISOString() } } as any },
     }).catch(() => { });
 }

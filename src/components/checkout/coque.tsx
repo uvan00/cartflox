@@ -1,8 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, ChevronDown, Lock, Package } from "lucide-react";
+import React, { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Lock, Package } from "lucide-react";
 import type { CheckoutTheme } from "@/lib/checkout-themes";
+import { STYLES_A_ETAPES, type CheckoutStyleId } from "@/lib/checkout-styles";
 import { MARQUE, MARQUE_ICONE, MARQUE_SITE, MARQUE_SITE_DEFINI } from "@/lib/marque";
 
 /**
@@ -24,8 +25,8 @@ export type Marchand = { nom: string; image?: string | null };
  */
 export type LangueCoque = "fr" | "en";
 const MOTS = {
-    fr: { retour: "Retour", payerA: "Payer à {nom}", details: "Détails", modeTest: "Mode test : aucun argent réel ne sera débité", propulse: "Propulsé par", confidentialite: "Confidentialité", securite: "Sécurité", chiffre: "Paiement chiffré, données jamais conservées", aide: "Un problème ? WhatsApp" },
-    en: { retour: "Back", payerA: "Pay {nom}", details: "Details", modeTest: "Test mode: no real money will be charged", propulse: "Powered by", confidentialite: "Privacy", securite: "Security", chiffre: "Encrypted payment, no data stored", aide: "A problem? WhatsApp" },
+    fr: { retour: "Retour", payerA: "Payer à {nom}", details: "Détails", modeTest: "Mode test : aucun argent réel ne sera débité", propulse: "Propulsé par", confidentialite: "Confidentialité", securite: "Sécurité", chiffre: "Paiement chiffré, données jamais conservées", aide: "Un problème ? WhatsApp", etapes: "Étapes", informations: "Informations", paiement: "Paiement", termine: "Terminé" },
+    en: { retour: "Back", payerA: "Pay {nom}", details: "Details", modeTest: "Test mode: no real money will be charged", propulse: "Powered by", confidentialite: "Privacy", securite: "Security", chiffre: "Encrypted payment, no data stored", aide: "A problem? WhatsApp", etapes: "Steps", informations: "Details", paiement: "Payment", termine: "Completed" },
 } as const;
 const LangueContexte = createContext<LangueCoque>("fr");
 export function useLangueCoque(): LangueCoque { return useContext(LangueContexte); }
@@ -135,27 +136,115 @@ export function PiedCartflox({ theme }: { theme: CheckoutTheme }) {
     );
 }
 
-export function Coque({ theme, test, gauche, children, largeurCarte = 480, langue = "fr" }: { theme: CheckoutTheme; test?: boolean; gauche: ReactNode; children: ReactNode; largeurCarte?: number; langue?: LangueCoque }) {
+/**
+ * Les trois etapes du paiement (styles boutique et express) : ce qui est fait
+ * en vert, l'etape en cours pleine, la suivante en gris.
+ */
+export function Etapes({ theme, actif, langue }: { theme: CheckoutTheme; actif: 1 | 2 | 3; langue: LangueCoque }) {
+    const noms = [mot(langue, "informations"), mot(langue, "paiement"), mot(langue, "termine")];
     return (
-        <LangueContexte.Provider value={langue}>
-        <div className="min-h-screen" style={{ background: theme.pageBg, color: theme.textPrimary, fontFamily: POLICE_TEXTE }}>
-            {test && (
-                <div className="sticky top-0 z-[60] px-3 py-1.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ background: "#FBBF24", color: "#7C2D12" }}>
-                    {mot(langue, "modeTest")}
+        <ol className="flex items-center gap-2 sm:gap-3" aria-label={mot(langue, "etapes")}>
+            {noms.map((nom, i) => {
+                const n = i + 1;
+                const fait = n < actif;
+                const enCours = n === actif;
+                return (
+                    <React.Fragment key={nom}>
+                        {i > 0 && <span className="h-px min-w-3 flex-1" style={{ background: theme.divider }} aria-hidden="true" />}
+                        <li className="flex shrink-0 items-center gap-2" aria-current={enCours ? "step" : undefined}>
+                            <span className="grid h-7 w-7 place-content-center rounded-full text-[12px] font-semibold"
+                                style={fait ? { background: theme.secureBadgeBg, color: theme.secureBadgeText } : enCours ? { background: theme.accent, color: theme.accentText } : { background: theme.methodHoverBg, color: theme.textMuted }}>
+                                {fait ? <Check size={13} strokeWidth={3} /> : n}
+                            </span>
+                            <span className={`text-[13.5px] font-medium ${enCours ? "" : "hidden sm:inline"}`} style={{ color: fait || enCours ? theme.textPrimary : theme.textMuted }}>{nom}</span>
+                        </li>
+                    </React.Fragment>
+                );
+            })}
+        </ol>
+    );
+}
+
+/**
+ * La coque, dans le style choisi par le marchand (lib/checkout-styles.ts) :
+ * - classique : deux colonnes, le detail a gauche, la carte a droite ;
+ * - boutique et express : le detail dans une carte a gauche, un grand panneau
+ *   a droite avec les etapes en haut ;
+ * - cartes : des cartes empilees sur telephone, cote a cote sur ordinateur.
+ */
+export function Coque({ theme, test, gauche, children, largeurCarte = 480, langue = "fr", style = "classique", etape }: {
+    theme: CheckoutTheme; test?: boolean; gauche: ReactNode; children: ReactNode; largeurCarte?: number; langue?: LangueCoque; style?: CheckoutStyleId; etape?: 1 | 2 | 3;
+}) {
+    const bandeauTest = test && (
+        <div className="sticky top-0 z-[60] px-3 py-1.5 text-center text-[11px] font-semibold uppercase tracking-wider" style={{ background: "#FBBF24", color: "#7C2D12" }}>
+            {mot(langue, "modeTest")}
+        </div>
+    );
+    const carte = { background: theme.cardBg, border: `1px solid ${theme.cardBorder}`, boxShadow: theme.cardShadow } as const;
+    // Fond du document et barre d'etat accordes au theme du marchand : c'est ce
+    // que le navigateur montre sous la barre d'etat, au rebond du defilement et
+    // avant que la page soit peinte (voir html.page-paiement, globals.css).
+    useEffect(() => {
+        document.documentElement.style.setProperty("--fond-paiement", theme.pageBg);
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.pageBg);
+    }, [theme.pageBg]);
+
+    let corps: ReactNode;
+    if (STYLES_A_ETAPES.includes(style)) {
+        corps = (
+            <div className="mx-auto w-full max-w-[1200px] px-4 pb-10 pt-5 lg:flex lg:items-start lg:gap-8 lg:px-8 lg:py-10">
+                <aside className="lg:w-[42%] lg:shrink-0">
+                    <div className="rounded-2xl p-5 lg:p-6" style={carte}>{gauche}</div>
+                    <div className="mt-6 hidden lg:block"><PiedCartflox theme={theme} /></div>
+                </aside>
+                <main className="mt-4 lg:mt-0 lg:min-w-0 lg:flex-1">
+                    <div className="overflow-hidden rounded-2xl" style={carte}>
+                        {etape && (
+                            <div className="px-6 pt-6 lg:px-10 lg:pt-8">
+                                <Etapes theme={theme} actif={etape} langue={langue} />
+                                <div className="mt-6 h-px" style={{ background: theme.divider }} />
+                            </div>
+                        )}
+                        <div className="lg:px-4 lg:py-2">{children}</div>
+                    </div>
+                    <div className="mt-6 lg:hidden"><PiedCartflox theme={theme} /></div>
+                </main>
+            </div>
+        );
+    } else if (style === "cartes") {
+        // Telephone : les cartes empilees. Ordinateur : les deux cartes cote a
+        // cote, le recapitulatif a gauche (colle en haut au defilement).
+        corps = (
+            <div className="mx-auto w-full max-w-[600px] px-4 pb-10 pt-5 sm:px-6 sm:py-10 lg:max-w-[1100px] lg:px-8">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+                    <section className="rounded-[26px] p-5 sm:p-6 lg:sticky lg:top-8 lg:w-[42%] lg:shrink-0" style={carte}>{gauche}</section>
+                    <section className="overflow-hidden rounded-[26px] lg:min-w-0 lg:flex-1" style={carte}>{children}</section>
                 </div>
-            )}
+                <div className="mt-4 px-2"><PiedCartflox theme={theme} /></div>
+            </div>
+        );
+    } else {
+        corps = (
             <div className="mx-auto w-full max-w-[1080px] lg:flex lg:min-h-screen">
                 <aside className="px-5 pt-5 lg:flex lg:w-[46%] lg:shrink-0 lg:flex-col lg:px-12 lg:py-16">
                     {gauche}
                     <div className="mt-auto hidden pt-12 lg:block"><PiedCartflox theme={theme} /></div>
                 </aside>
                 <main className="px-4 pb-10 pt-4 lg:flex-1 lg:px-12 lg:py-16">
-                    <div className="mx-auto w-full overflow-hidden rounded-2xl" style={{ maxWidth: largeurCarte, background: theme.cardBg, border: `1px solid ${theme.cardBorder}`, boxShadow: theme.cardShadow }}>
+                    <div className="mx-auto w-full overflow-hidden rounded-2xl" style={{ maxWidth: largeurCarte, ...carte }}>
                         {children}
                     </div>
                     <div className="mx-auto mt-6 w-full lg:hidden" style={{ maxWidth: largeurCarte }}><PiedCartflox theme={theme} /></div>
                 </main>
             </div>
+        );
+    }
+
+    return (
+        <LangueContexte.Provider value={langue}>
+        <div className="min-h-screen" style={{ background: theme.pageBg, color: theme.textPrimary, fontFamily: POLICE_TEXTE }}>
+            {bandeauTest}
+            {corps}
         </div>
         </LangueContexte.Provider>
     );

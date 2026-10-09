@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { DEFAULT_THEME } from "@/lib/checkout-themes";
 import { Inter_Tight, Instrument_Serif } from "next/font/google";
 
 // Meme charte que la page d'accueil de cartflox.com : Inter Tight pour le
@@ -15,6 +16,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
     width: "device-width",
     initialScale: 1,
+    // Barre d'etat et d'onglets du navigateur a la couleur de la page, pas au
+    // noir du tableau de bord ; la coque la met ensuite au theme du marchand.
+    themeColor: DEFAULT_THEME.pageBg,
 };
 
 export default function CheckoutLayout({ children }: { children: React.ReactNode }) {

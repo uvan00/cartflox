@@ -209,6 +209,7 @@ model Transaction {
   test           Boolean           @default(false)
   application    Application?      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   logs           ProviderLog[]
+  tentatives     Tentative[]
 
   @@index([status])
   @@index([provider])
@@ -276,6 +277,7 @@ model RoutingConfig {
   application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   // Active algorithm kind
+  algorithmKind   RoutingAlgorithmKind @default(PRIORITY)
 
   // method assignments: { "methodCode||country": "gatewayId" }
   methodAssignments Json?
@@ -312,6 +314,7 @@ model RoutingDecision {
   id                  String      @id @default(cuid())
   applicationId       String
   transactionId       String?
+  algorithmKind       RoutingAlgorithmKind @default(PRIORITY)
   methodCode          String
   country             String
   currency            String
@@ -326,6 +329,10 @@ model RoutingDecision {
   reason              String?
   // Whether a method-assignment override was hit
   assignedOverride    Boolean     @default(false)
+  // Comment l'ordre a ete obtenu (regle_marchand, mesure, exploration, sante...) et
+  // combien de tentatives ont ete jouees (poses a la fin de l'initiation).
+  approche            String?
+  tentatives          Int?
   createdAt           DateTime    @default(now())
 
   @@index([applicationId, createdAt])
@@ -339,6 +346,14 @@ enum TransactionStatus {
   FAILED
   CANCELLED
   REFUNDED
+}
+
+enum RoutingAlgorithmKind {
+  SINGLE        // Straight-through to one gateway
+  PRIORITY      // Ordered list, try first, fallback on failure
+  VOLUME_SPLIT  // Probabilistic % split (e.g. 70% Hub2, 30% NotchPay)
+  ADVANCED      // Rule-based DSL (if amount > 5000 && country == CI then Hub2)
+  DYNAMIC       // Success-rate based: track scores, prefer best performer
 }
 
 enum PaymentType {
@@ -594,6 +609,82 @@ model RoutageScore {
 /// chaque rejet ouvre une conversation dans le support (l'expediteur est
 /// support@cartflox.com). Seuls les rejets DEFINITIFS entrent ici : une boite
 /// pleine ou un refus de politique se retentent plus tard.
+/// Une TENTATIVE = un essai chez une passerelle pour un paiement (08/10/2026, modele
+/// Hyperswitch : une ligne par connecteur essaye). La transaction ne garde que la
+/// derniere reference ; ici chacune reste retrouvable par le webhook et le cron.
+/// Statuts : INITIEE (envoyee), ACCEPTEE (le fournisseur a pris la demande),
+/// REFUSEE (refus immediat, avec code et categorie), INCERTAINE (delai depasse :
+/// la demande a pu partir, on verifie avant tout nouvel essai), REUSSIE, ECHOUEE,
+/// REMPLACEE (une tentative plus recente a ete acceptee), ABANDONNEE.
+model Tentative {
+  id            String      @id @default(cuid())
+  transactionId String
+  rang          Int
+  gatewayId     String
+  fournisseur   String
+  contexte      String
+  /// Notre reference, posee AVANT l'appel (identifiant de depot PawaPay...).
+  reference     String      @unique
+  providerRef   String?
+  statut        String
+  approche      String?
+  code          String?
+  categorie     String?
+  decision      String?
+  message       String?
+  dureeMs       Int?
+  creeLe        DateTime    @default(now())
+  termineeLe    DateTime?
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId, rang])
+  @@index([providerRef])
+  @@index([statut, creeLe])
+  @@index([gatewayId, creeLe])
+}
+
+/// Mesure du routage par FENETRE GLISSANTE (08/10/2026, taux de succes facon
+/// Hyperswitch) : des blocs de quelques issues, on garde les derniers. Une ligne
+/// par portee (`plateforme` = le fournisseur pour tous les marchands, `gw:<id>` =
+/// ce compte), contexte (PAYS|OPERATEUR|DEVISE) et passerelle. Le seau perce
+/// ecarte temporairement une passerelle en panne.
+model RoutageMesure {
+  id         String   @id @default(cuid())
+  portee     String
+  contexte   String
+  passerelle String
+  blocs      Json     @default("[]")
+  reussis    Int      @default(0)
+  echoues    Int      @default(0)
+  seau       Float    @default(0)
+  seauMaj    DateTime @default(now())
+  majLe      DateTime @default(now()) @updatedAt
+
+  @@unique([portee, contexte, passerelle], map: "RoutageMesure_cle")
+  @@index([contexte])
+}
+
+/// SANTE DES MOYENS : un operateur dans un pays, en panne chez un fournisseur
+/// (`cle` = « pawapay ») ou sur un compte (`cle` = « gw:<id> »). Pas de ligne =
+/// disponible. Voir src/lib/orchestrator/sante-moyens.ts.
+model SanteMoyen {
+  id        String    @id @default(cuid())
+  cle       String
+  pays      String
+  operateur String
+  /// INDISPONIBLE ou DEGRADE
+  etat      String
+  /// api (l'agregateur le publie) ou refus (un paiement vient d'etre refuse pour cela)
+  source    String
+  detail    String?
+  depuis    DateTime  @default(now())
+  /// Fin d'un marquage « refus » ; vide pour « api ».
+  jusqua    DateTime?
+  verifieLe DateTime  @default(now())
+
+  @@unique([cle, pays, operateur])
+}
+
 model AdresseMorte {
   email     String   @id
   motif     String?

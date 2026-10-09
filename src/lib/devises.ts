@@ -18,6 +18,17 @@ export const DEVISES_SANS_CENTIMES = new Set([
     "CDF",
 ]);
 
+/**
+ * Devises que l'API de Stripe compte en unités (500 = 500 XOF). Les autres se donnent
+ * en centièmes. ISK et UGX n'y sont plus : sans décimales à l'usage, Stripe les veut
+ * pourtant en centièmes ronds (5 UGX = 500, divisible par 100). Un paiement par carte
+ * en shillings ougandais était refusé à chaque fois (06/10/2026).
+ * https://docs.stripe.com/currencies#special-cases
+ */
+export const STRIPE_SANS_DECIMALES = new Set([
+    "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "VND", "VUV", "XAF", "XOF", "XPF",
+]);
+
 export const decimalesDevise = (devise?: string | null) =>
     DEVISES_SANS_CENTIMES.has((devise || "XOF").toUpperCase()) ? 0 : 2;
 

@@ -176,13 +176,17 @@ export async function applyVerificationResult(
         });
     } catch { /* audit log is best-effort */ }
 
-    // Compter l'issue DEFINITIVE pour le routage : c'est ici, et nulle part
-    // ailleurs, que l'on sait si la passerelle a encaisse. Compter a
-    // l'initiation reviendrait a la noter sur sa capacite a decrocher.
-    if (["SUCCESS", "FAILED"].includes(verification.status)) {
+    // Clore la TENTATIVE qui portait le paiement (REUSSIE, ECHOUEE, ABANDONNEE),
+    // puis compter l'issue DEFINITIVE pour le routage, par tentative : c'est ici,
+    // et nulle part ailleurs, que l'on sait si la passerelle a encaisse. Les
+    // transactions d'avant les tentatives passent par la decision de routage.
+    if (["SUCCESS", "FAILED", "CANCELLED"].includes(verification.status)) {
         (async () => {
+            const { cloreTentatives } = await import("@/lib/orchestrator/tentatives-depot");
+            const porteuse = await cloreTentatives(updated, verification.status as "SUCCESS" | "FAILED" | "CANCELLED", verification);
+            if (verification.status === "CANCELLED") return;
             const { reperesTransaction, enregistrerIssue } = await import("@/lib/orchestrator/routage-mesure");
-            const reperes = await reperesTransaction(updated);
+            const reperes = porteuse ?? await reperesTransaction(updated);
             if (!reperes) return;
             const reussi = verification.status === "SUCCESS";
             let categorie;
@@ -244,6 +248,15 @@ async function notifyMerchant(tx: any, content: { title: string; body: string })
     });
 }
 
+/** Le verrou d'initiation (metadata.verrou) est interne : jamais dans un webhook sortant. */
+function sansVerrou(metadata: unknown): unknown {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return metadata;
+    if (!("verrou" in metadata)) return metadata;
+    const reste = { ...(metadata as Record<string, unknown>) };
+    delete reste.verrou;
+    return reste;
+}
+
 /**
  * Dispatch the merchant's outgoing webhook for a status change — same
  * payload shape as the provider-webhook route.
@@ -266,7 +279,7 @@ export async function dispatchOutgoingStatusWebhook(
         customer_name: tx.customerName,
         customer_email: tx.customerEmail,
         customer_phone: tx.customerPhone,
-        metadata: tx.metadata,
+        metadata: sansVerrou(tx.metadata),
         completed_at: status === "SUCCESS" ? (tx.completedAt ? new Date(tx.completedAt).toISOString() : new Date().toISOString()) : null,
     };
     return envoyerWebhook(
@@ -289,6 +302,7 @@ export async function annulerAbandon(transactionId: string, motif = "abandon"): 
     const tx = await prisma.transaction.findUnique({ where: { id: transactionId } });
     if (!tx) return false;
     logger.info("[tx-finalize] abandon", { txId: transactionId, motif });
+    import("@/lib/orchestrator/tentatives-depot").then(({ cloreTentatives }) => cloreTentatives(tx, "CANCELLED")).catch(() => { });
     dispatchOutgoingStatusWebhook(tx, "CANCELLED", tx.provider || "").catch(() => { });
     return true;
 }

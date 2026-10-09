@@ -204,7 +204,7 @@ function resolveDynamic(config: RoutingConfig, primaryGatewayId: string): string
 
 // ─── Rule evaluation ─────────────────────────────────────────────────────────
 
-function evaluateRule(rule: RoutingRule, ctx: PaymentContext): boolean {
+export function evaluateRule(rule: RoutingRule, ctx: PaymentContext): boolean {
     return rule.conditions.every(cond => evaluateCondition(cond, ctx));
 }
 
@@ -295,9 +295,9 @@ function filterAllowed(ids: string[], allowed: string[]): string[] {
  * Weighted random selection using the WeightedIndex approach from Hyperswitch.
  * Returns the winning gatewayId.
  */
-function weightedRandom(splits: VolumeSplitEntry[]): string {
+export function weightedRandom(splits: VolumeSplitEntry[], alea: () => number = Math.random): string {
     const total = splits.reduce((sum, s) => sum + s.split, 0);
-    let rand = Math.random() * total;
+    let rand = alea() * total;
     for (const entry of splits) {
         rand -= entry.split;
         if (rand <= 0) return entry.gatewayId;

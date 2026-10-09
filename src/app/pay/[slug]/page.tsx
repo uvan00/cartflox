@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { User, Mail, Smartphone, ArrowRight, Loader2, X, Minus, Plus } from "lucide-react";
+import { User, Mail, ArrowRight, Loader2, X, Minus, Plus } from "lucide-react";
 import { getPaymentLinkBySlug, initializePaymentLinkTransaction } from "@/lib/actions/payment-links";
 import { goeyToast } from "goey-toast";
 import { useParams } from "next/navigation";
 import { getThemeById, DEFAULT_THEME, type CheckoutTheme } from "@/lib/checkout-themes";
+import { DEFAULT_STYLE, styleCheckout, type CheckoutStyleId } from "@/lib/checkout-styles";
 import { Coque, PiedCarte, BoutonPrincipal, Etiquette, champStyle } from "@/components/checkout/coque";
+import { ChampTelephone, paysDUnNumero, type ValeurTelephone } from "@/components/checkout/champ-telephone";
 import { PanneauProduit, type LigneResume } from "@/components/checkout/panneau-produit";
 import { arrondirMontant, decimalesDevise } from "@/lib/devises";
 import { MARQUE } from "@/lib/marque";
@@ -63,6 +65,15 @@ export default function PublicPaymentPage() {
 
     const [link, setLink] = useState<Lien>(null);
     const [theme, setTheme] = useState<CheckoutTheme>(DEFAULT_THEME);
+    // Le style (la disposition) du marchand ; `?style=` l'emporte, pour l'apercu.
+    const [styleMarchand, setStyleMarchand] = useState<CheckoutStyleId>(DEFAULT_STYLE);
+    const [styleForce, setStyleForce] = useState<CheckoutStyleId | null>(null);
+    useEffect(() => {
+        const demande = new URLSearchParams(window.location.search).get("style");
+        if (demande) setStyleForce(styleCheckout(demande));
+    }, []);
+    const style: CheckoutStyleId = styleForce || styleMarchand;
+    const styleBouton: React.CSSProperties | undefined = style === "cartes" ? { height: 56, borderRadius: 16, fontSize: 16 } : (style === "boutique" || style === "express") ? { height: 52, borderRadius: 12 } : undefined;
     const [isLoading, setIsLoading] = useState(true);
     const [quantity, setQuantity] = useState(1);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -72,7 +83,9 @@ export default function PublicPaymentPage() {
     // Customer info
     const [customerName, setCustomerName] = useState("");
     const [customerEmail, setCustomerEmail] = useState("");
-    const [customerPhone, setCustomerPhone] = useState("");
+    /** Numero international et son erreur, tenus par le champ a drapeaux. */
+    const [telephone, setTelephone] = useState<ValeurTelephone>({ e164: "", erreur: "" });
+    const [voirErreurTel, setVoirErreurTel] = useState(false);
 
     useEffect(() => {
         if (!slug) return;
@@ -86,6 +99,7 @@ export default function PublicPaymentPage() {
                     setTheme(perso && typeof perso === "object"
                         ? { ...getThemeById("cartflox"), ...perso, id: "custom", name: "Personnalisé" }
                         : getThemeById(data.theme?.id || "cartflox"));
+                    setStyleMarchand(styleCheckout(data.theme?.style));
                     // Montant suggere par le marchand : pre-rempli, modifiable.
                     if (data.amountFree && data.amount > 0) setMontantLibre(String(data.amount));
                 }
@@ -126,13 +140,15 @@ export default function PublicPaymentPage() {
     const handlePayment = async (e: React.FormEvent) => {
         e.preventDefault();
         if (blocage) { goeyToast.error(blocage); return; }
+        // Numero mal saisi : le message sous le champ suffit, on y ramene le client.
+        if (link?.requestPhone && telephone.erreur) { setVoirErreurTel(true); document.getElementById("cf-telephone")?.focus(); return; }
         setIsProcessing(true);
         try {
             const result = await initializePaymentLinkTransaction({
                 slug,
                 customerName,
                 customerEmail,
-                customerPhone,
+                customerPhone: link?.requestPhone ? telephone.e164 : "",
                 quantity: quantite,
                 ...(link?.amountFree ? { amount: prixUnitaire } : {}),
             });
@@ -151,7 +167,7 @@ export default function PublicPaymentPage() {
     if (isLoading) {
         const os = (w: string, h = 12) => <div className="animate-pulse rounded-md" style={{ width: w, height: h, background: theme.methodHoverBg }} />;
         return (
-            <Coque theme={theme} langue={langue} gauche={
+            <Coque theme={theme} langue={langue} style={style} etape={1} gauche={
                 <div className="flex flex-col gap-4 lg:gap-6">
                     <div className="flex items-center gap-3"><div className="h-11 w-11 animate-pulse rounded-full" style={{ background: theme.methodHoverBg }} />{os('120px', 14)}</div>
                     <div className="animate-pulse rounded-2xl" style={{ background: theme.methodHoverBg, aspectRatio: "4 / 3" }} />
@@ -169,7 +185,7 @@ export default function PublicPaymentPage() {
 
     if (!link) {
         return (
-            <Coque theme={theme} langue={langue} gauche={<div className="hidden lg:block"><p className="text-[13px]" style={{ color: theme.textMuted }}>{MARQUE}</p><p className="mt-2 text-[28px] leading-tight" style={{ color: theme.textPrimary }}>{tr("lien_nulle_part")}</p></div>}>
+            <Coque theme={theme} langue={langue} style={style} etape={1} gauche={<div className="hidden lg:block"><p className="text-[13px]" style={{ color: theme.textMuted }}>{MARQUE}</p><p className="mt-2 text-[28px] leading-tight" style={{ color: theme.textPrimary }}>{tr("lien_nulle_part")}</p></div>}>
                 <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
                     <span className="grid h-14 w-14 place-content-center rounded-full" style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444" }}><X size={24} /></span>
                     <p className="text-[16px] font-semibold" style={{ color: theme.textPrimary }}>{tr("lien_introuvable")}</p>
@@ -220,7 +236,7 @@ export default function PublicPaymentPage() {
     );
 
     return (
-        <Coque theme={theme} langue={langue} gauche={
+        <Coque theme={theme} langue={langue} style={style} etape={1} gauche={
             <PanneauProduit theme={theme} marchand={marchand} titre={link.title} description={link.description} images={link.images}
                 montant={total > 0 ? fmt(total) : ""} devise={devise} etiquette={etiquette} lignes={lignes}
                 enfants={link.allowQuantity ? (
@@ -238,7 +254,7 @@ export default function PublicPaymentPage() {
                 <div className="flex flex-col gap-4 px-6 pt-6 pb-2">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <h1 className="text-[18px] font-semibold tracking-tight" style={{ color: theme.textPrimary }}>{link.amountFree ? tr("combien_payer") : tr("vos_coordonnees")}</h1>
+                            <h1 className={style === "classique" ? "text-[18px] font-semibold tracking-tight" : "text-[22px] font-semibold tracking-tight"} style={{ color: theme.textPrimary }}>{link.amountFree ? tr("combien_payer") : tr("vos_coordonnees")}</h1>
                             <p className="mt-0.5 text-[12.5px]" style={{ color: theme.textMuted }}>
                                 {link.amountFree && total <= 0 ? tr("saisissez_montant") : tr("pour_envoyer_recu", { montant: fmt(total), devise })}
                             </p>
@@ -294,17 +310,14 @@ export default function PublicPaymentPage() {
                     {link.requestPhone && (
                         <div>
                             <Etiquette theme={theme}>{tr("numero_telephone")}</Etiquette>
-                            <div className="relative">
-                                <Smartphone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: theme.textMuted }} />
-                                <input required type="tel" placeholder="+225 07 00 00 00 00" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} autoComplete="tel" inputMode="tel"
-                                    className="h-12 w-full rounded-xl pl-10 pr-4 outline-none" style={champStyle(theme)} />
-                            </div>
+                            <ChampTelephone theme={theme} langue={langue} requis onChange={setTelephone} erreurForcee={voirErreurTel}
+                                paysRepli={paysDUnNumero(link.marchand.whatsapp)} />
                         </div>
                     )}
                 </div>
 
                 <div className="px-6 pb-6 pt-3">
-                    <BoutonPrincipal theme={theme} type="submit" disabled={isProcessing || !customerName || !customerEmail || !!blocage}>
+                    <BoutonPrincipal theme={theme} type="submit" style={styleBouton} disabled={isProcessing || !customerName || !customerEmail || !!blocage || (link.requestPhone && !telephone.e164)}>
                         {isProcessing ? <><Loader2 size={16} className="animate-spin" /> {tr("un_instant")}</> : <>{tr("continuer_paiement")} <ArrowRight size={15} /></>}
                     </BoutonPrincipal>
                     <div className="mt-4 flex items-center justify-center gap-1.5">
